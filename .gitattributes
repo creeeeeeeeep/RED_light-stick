@@ -1,0 +1,14 @@
+# 저장소 안에서는 LF 로 통일한다. 체크아웃할 때는 각자 OS 에 맞춰진다.
+* text=auto eol=lf
+
+# 바이너리 — diff 를 시도하지 않게 한다
+*.bin  binary
+*.stl  binary
+*.zip  binary
+*.png  binary
+
+# 배치 파일은 CRLF 여야 cmd 가 제대로 읽는다
+*.bat  text eol=crlf
+
+# PowerShell 은 UTF-8 BOM 이 필요해서(한글이 깨진다) git 이 손대지 않게 둔다
+*.ps1  -text

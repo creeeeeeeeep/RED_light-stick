@@ -1,0 +1,50 @@
+# 올라가면 안 되는 것 ------------------------------------------------------
+#
+# rooms.json 에는 팬마다의 토큰이 평문으로 들어 있다. 이게 공개되면 그 방에
+# 아무나 이모티콘을 쏠 수 있다. config.json 의 admin_token 은 아무 방에나
+# 들어갈 수 있는 만능 키다. 둘 다 절대 커밋하지 않는다.
+server/rooms.json
+server/rooms.json.tmp
+server/config.json
+
+# 봉이 보낸 모션 로그. 개인정보는 아니지만 양이 많고 올릴 이유가 없다.
+server/logs/
+
+# 이전 버전 펌웨어 보관함. 배포용 하나만 올리면 된다.
+server/firmware/archive/
+
+# 설정 예시는 올려도 된다 (실제 값이 없는 것)
+!server/config.example.json
+
+# 빌드 산출물 ---------------------------------------------------------------
+build/
+build_dev/
+sdkconfig
+sdkconfig.old
+sdkconfig.devbuild
+sdkconfig.devbuild.old
+
+# 바탕화면의 firmware/ 는 사본이다. 진짜는 C:\esp\cheerstick 에 있다.
+firmware/build/
+
+# 잡동사니 -----------------------------------------------------------------
+__pycache__/
+*.pyc
+.venv/
+Thumbs.db
+desktop.ini
+*.tmp
+
+# 3D 모델 -------------------------------------------------------------------
+#
+# STL 과 zip 이 35MB 다. git 은 바이너리 변경을 통째로 저장하므로 모델을 한 번
+# 고칠 때마다 저장소가 그만큼 불어난다. 올리려면 따로 정하고 넣자
+# (Releases 에 zip 으로 붙이거나, 별도 저장소가 낫다).
+modeling/
+
+# OTA 로 내보내는 펌웨어. crown release 가 만들어내는 산출물이라 소스가 아니다.
+# 이건 각자 서버가 들고 있으면 된다.
+server/firmware/*.bin
+
+# server/launchpad/ 는 일부러 남긴다 — GitHub Pages 로 팬에게 나눠줄 때
+# 그 폴더가 그대로 배포 대상이 된다.

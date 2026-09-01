@@ -1,0 +1,11 @@
+esp_toml_version = 1.0
+
+firmware_images_url = "https://crown.example.com/launchpad/"
+
+supported_apps = ["crown"]
+
+[crown]
+chipsets = ["ESP32-S3"]
+image.esp32-s3 = "cheerstick-0.8.0-merged.bin"
+description = "크라운 응원봉 v0.8.0 — 흔들면 치지직 채팅에 이모티콘이 올라갑니다"
+console_baudrate = 115200

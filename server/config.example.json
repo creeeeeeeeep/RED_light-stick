@@ -1,0 +1,9 @@
+{
+  "motions": {
+    "SWAY_LR": "redredMinidance1",
+    "PUMP_UD": "redredLight",
+    "VIGOROUS": "redredLight5"
+  },
+  "max_per_message": 10,
+  "admin_token": "여기에-길고-무작위한-값을-넣으세요"
+}

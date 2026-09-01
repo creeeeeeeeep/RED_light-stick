@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>크라운 응원봉 — 봉 시뮬레이터</title>
+<style>
+  body { max-width: 620px; margin: 40px auto; padding: 0 20px;
+         font: 14px/1.6 "Malgun Gothic", system-ui, sans-serif; color: #222; }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .sub { color: #777; font-size: 13px; margin-bottom: 24px; }
+  fieldset { border: 1px solid #ddd; border-radius: 6px; padding: 14px 16px; margin-bottom: 16px; }
+  legend { padding: 0 6px; color: #555; font-size: 13px; }
+  button { font: inherit; padding: 10px 14px; margin: 4px 4px 4px 0;
+           border: 1px solid #ccc; border-radius: 5px; background: #fff; cursor: pointer; }
+  button:hover { background: #f4f4f4; }
+  button.primary { background: #2b6cb0; color: #fff; border-color: #2b6cb0; font-weight: bold; }
+  button.danger { color: #c00; }
+  input { font: inherit; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; }
+  label { display: inline-block; width: 60px; color: #555; }
+  #log { background: #f6f6f6; border-radius: 6px; padding: 12px;
+         height: 220px; overflow: auto; font-family: Consolas, monospace; font-size: 12px;
+         white-space: pre-wrap; }
+  .row { margin-bottom: 8px; }
+  .stat { display: inline-block; padding: 2px 8px; border-radius: 10px;
+          background: #eee; font-size: 12px; }
+  .ok { background: #d5f0d5; }
+  .no { background: #f6d5d5; }
+</style>
+</head>
+<body>
+
+<h1>크라운 응원봉 — 봉 시뮬레이터</h1>
+<div class="sub">
+  ESP32 봉을 만들기 전에 <b>서버 → 확장 → 치지직 채팅</b> 흐름을 검증하는 페이지입니다.
+  아래 버튼이 봉이 보내는 HTTP POST 와 동일한 요청을 보냅니다.
+</div>
+
+<fieldset>
+  <legend>설정</legend>
+  <div class="row"><label>방</label><input id="room" value="crown-test" size="20"></div>
+  <div class="row"><label>토큰</label><input id="token" value="change-me" size="20"></div>
+  <div class="row">
+    확장 연결: <span id="conn" class="stat">확인 중</span>
+    <button onclick="refresh()">새로고침</button>
+  </div>
+</fieldset>
+
+<fieldset>
+  <legend>흔들기 (입력창에 이모티콘이 쌓입니다)</legend>
+  <button onclick="stick('add','SWAY_LR')">좌우로 흔들기</button>
+  <button onclick="stick('add','PUMP_UD')">위아래로 찍기</button>
+  <button onclick="stick('add','VIGOROUS')">격하게 흔들기</button>
+</fieldset>
+
+<fieldset>
+  <legend>봉 버튼</legend>
+  <button class="primary" onclick="stick('send')">전송</button>
+  <button class="danger" onclick="stick('clear')">입력창 비우기</button>
+</fieldset>
+
+<fieldset>
+  <legend>연속 테스트</legend>
+  <button onclick="burst()">좌우 3회 → 전송</button>
+  <button onclick="mixed()">3종 섞어서 → 전송</button>
+</fieldset>
+
+<div id="log"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function log(msg, cls) {
+  const t = new Date().toTimeString().slice(0, 8);
+  $('log').textContent = `[${t}] ${msg}\n` + $('log').textContent;
+}
+
+async function stick(action, motion) {
+  const body = {
+    room: $('room').value.trim(),
+    token: $('token').value.trim(),
+    action,
+  };
+  if (motion) body.motion = motion;
+
+  try {
+    const res = await fetch('/api/stick', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      log(`실패 ${res.status}: ${text}`);
+      return false;
+    }
+    const j = JSON.parse(text);
+    log(`${action}${motion ? ' ' + motion : ''} → 확장 ${j.delivered}개 전달`
+        + (j.payload.emojiId ? ` (${j.payload.emojiId})` : ''));
+    if (j.delivered === 0) log('  ⚠ 연결된 확장이 없습니다. 치지직 탭이 열려 있는지 확인하세요.');
+    return j.delivered > 0;
+  } catch (e) {
+    log('요청 오류: ' + e.message);
+    return false;
+  }
+}
+
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+
+async function burst() {
+  for (let i = 0; i < 3; i++) { await stick('add', 'SWAY_LR'); await wait(600); }
+  await wait(400);
+  await stick('send');
+}
+
+async function mixed() {
+  await stick('add', 'SWAY_LR');   await wait(600);
+  await stick('add', 'PUMP_UD');   await wait(600);
+  await stick('add', 'VIGOROUS');  await wait(600);
+  await wait(400);
+  await stick('send');
+}
+
+async function refresh() {
+  try {
+    const j = await (await fetch('/api/status')).json();
+    const el = $('conn');
+    el.textContent = j.connected > 0 ? `${j.connected}개 연결됨` : '없음';
+    el.className = 'stat ' + (j.connected > 0 ? 'ok' : 'no');
+  } catch (e) {
+    $('conn').textContent = '서버 응답 없음';
+    $('conn').className = 'stat no';
+  }
+}
+
+refresh();
+setInterval(refresh, 3000);
+log('준비되었습니다. 치지직 방송 탭을 열어두고 확장이 연결되었는지 확인하세요.');
+</script>
+
+</body>
+</html>

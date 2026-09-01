@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>크라운 응원봉 — 모션 모니터</title>
+<style>
+  :root { --bg:#14161a; --panel:#1c2027; --line:#2a2f38; --text:#e8eaed; --dim:#8b929e; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:18px; background:var(--bg); color:var(--text);
+         font:13px/1.55 "Malgun Gothic", system-ui, sans-serif; }
+  h1 { margin:0 0 2px; font-size:15px; }
+  .sub { color:var(--dim); font-size:12px; margin-bottom:14px; }
+  .bar { display:flex; gap:8px; align-items:center; margin-bottom:14px; flex-wrap:wrap; }
+  button { font:inherit; padding:7px 14px; border-radius:5px; cursor:pointer;
+           border:1px solid var(--line); background:#242932; color:var(--text); }
+  button:hover { background:#2c323d; }
+  button.primary { background:#2b6cb0; border-color:#2b6cb0; font-weight:bold; }
+  button:disabled { opacity:.4; cursor:default; }
+  .grid { display:grid; grid-template-columns: 300px 1fr; gap:14px; align-items:start; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px; }
+  .gesture { font-size:30px; font-weight:bold; text-align:center; padding:22px 0 6px;
+             letter-spacing:1px; transition:color .12s; }
+  .gname { text-align:center; color:var(--dim); font-size:12px; padding-bottom:14px; }
+  .metric { margin-bottom:11px; }
+  .mlabel { display:flex; justify-content:space-between; font-size:11px;
+            color:var(--dim); margin-bottom:3px; }
+  .mlabel b { color:var(--text); font-weight:600; }
+  .track { position:relative; height:9px; background:#11141a;
+           border-radius:5px; overflow:hidden; }
+  .fill { height:100%; border-radius:5px; transition:width .08s linear; }
+  canvas { width:100%; height:210px; display:block; }
+  .legend { display:flex; gap:14px; font-size:11px; color:var(--dim); margin-top:8px; }
+  .legend i { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:4px; }
+  #log { margin-top:14px; height:150px; overflow:auto; background:#0e1116;
+         border:1px solid var(--line); border-radius:6px; padding:9px;
+         font-family:Consolas,monospace; font-size:11px; color:#9aa3af;
+         white-space:pre-wrap; word-break:break-all; }
+  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:12px; }
+  .stat { background:#11141a; border-radius:6px; padding:8px; text-align:center; }
+  .stat .v { font-size:17px; font-weight:bold; }
+  .stat .k { font-size:10px; color:var(--dim); }
+  .warn { color:#e08050; }
+</style>
+</head>
+<body>
+
+<h1>크라운 응원봉 — 모션 모니터</h1>
+<div class="sub">
+  보드를 USB로 연결하고 <b>연결</b>을 누르세요. 크롬/엣지에서만 동작합니다.<br>
+  데이터가 안 보이면 <b>보드 리셋</b>을 눌러 부팅 로그부터 확인하세요.
+  ESP-IDF 시리얼 모니터가 열려 있으면 포트를 점유하므로 먼저 닫아야 합니다.
+</div>
+
+<div class="bar">
+  <button id="connect" class="primary">연결</button>
+  <button id="disconnect" disabled>연결 해제</button>
+  <button id="reset" disabled>보드 리셋</button>
+  <button id="save" disabled>로그 저장</button>
+  <button id="clear">화면 지우기</button>
+  <span id="status" style="color:var(--dim)">대기 중</span>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <div class="gesture" id="gesture">—</div>
+    <div class="gname" id="gname">보드 연결 대기</div>
+
+    <div class="metric">
+      <div class="mlabel"><span>수직 성분 V</span><b id="vV">0.00</b></div>
+      <div class="track"><div class="fill" id="fV" style="background:#c56bd6;width:0"></div></div>
+    </div>
+    <div class="metric">
+      <div class="mlabel"><span>수평 성분 H</span><b id="vH">0.00</b></div>
+      <div class="track"><div class="fill" id="fH" style="background:#3fb6c8;width:0"></div></div>
+    </div>
+    <div class="metric">
+      <div class="mlabel"><span>전체 RMS</span><b id="vT">0.00</b></div>
+      <div class="track"><div class="fill" id="fT" style="background:#5b8ff9;width:0"></div></div>
+    </div>
+    <div class="metric">
+      <div class="mlabel"><span>피크</span><b id="vP">0.00</b></div>
+      <div class="track"><div class="fill" id="fP" style="background:#f6a24a;width:0"></div></div>
+    </div>
+    <div class="metric">
+      <div class="mlabel"><span>자이로 RMS</span><b id="vG">0</b></div>
+      <div class="track"><div class="fill" id="fG" style="background:#7bc86c;width:0"></div></div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="v" id="sStroke">0</div><div class="k">스트로크</div></div>
+      <div class="stat"><div class="v" id="sTilt">0°</div><div class="k">기울기</div></div>
+      <div class="stat"><div class="v" id="sMa">0</div><div class="k">전류 mA</div></div>
+      <div class="stat"><div class="v" id="sHz">0</div><div class="k">수신 Hz</div></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <canvas id="chart"></canvas>
+    <div class="legend">
+      <span><i style="background:#c56bd6"></i>수직 V</span>
+      <span><i style="background:#3fb6c8"></i>수평 H</span>
+      <span><i style="background:#5b8ff9"></i>전체</span>
+      <span><i style="background:#e0b050"></i>임계선</span>
+    </div>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+/* ------------------------------------------------------------------
+ * 펌웨어가 50ms 마다 내보내는 CSV 를 읽어 그린다.
+ *   TUNE,<ms>,<제스처>,<V>,<H>,<전체>,<피크>,<자이로>,<스트로크>,<기울기>,<mA>
+ *
+ * 임계값은 gesture.c 의 gesture_default_config() 와 맞춰 둔 값이다.
+ * 펌웨어에서 바꾸면 여기도 같이 바꿔야 그래프의 임계선이 의미를 갖는다.
+ * ------------------------------------------------------------------ */
+var TH = { idle: 0.12, vigRms: 1.65, vigPeak: 3.20, vigGyro: 500 };
+var SCALE = { v: 3, h: 3, t: 3, p: 5, g: 800 };   // 막대 100% 에 해당하는 값
+
+var COLORS = {
+  IDLE:     ['#6b7280', '정지'],
+  SWAY_LR:  ['#3fb6c8', '좌우로 흔드는 중'],
+  PUMP_UD:  ['#c56bd6', '위아래로 찍는 중'],
+  VIGOROUS: ['#f6a24a', '격하게 흔드는 중']
+};
+
+var NL = String.fromCharCode(10);
+var CR = String.fromCharCode(13);
+
+function $(id) { return document.getElementById(id); }
+function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+var port = null, reader = null, keepReading = false;
+var lines = [];            // 저장용 원본
+var hist = [];             // 그래프용 (최근 N개)
+var HIST_MAX = 300;
+var rxCount = 0, lastHzAt = performance.now(), lastRxAt = 0;
+
+/* ---------------------------------------------------------- 시리얼 */
+
+async function connect() {
+  if (!('serial' in navigator)) {
+    setStatus('이 브라우저는 Web Serial 을 지원하지 않습니다 (크롬/엣지 필요)', true);
+    return;
+  }
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+    await releaseResetLine();
+  } catch (e) {
+    setStatus('연결 취소 또는 실패: ' + e.message, true);
+    port = null;
+    return;
+  }
+
+  $('connect').disabled = true;
+  $('disconnect').disabled = false;
+  $('reset').disabled = false;
+  $('save').disabled = false;
+  setStatus('연결됨 — 데이터 기다리는 중');
+  appendLog('--- 연결됨 ---');
+
+  keepReading = true;
+  lastRxAt = performance.now();
+  readLoop();
+  watchIdle();
+}
+
+/*
+ * 포트를 연 직후 RTS/DTR 를 반드시 내린다.
+ *
+ * ESP32-S3 는 USB-Serial-JTAG 이 CDC 제어선을 칩 핀에 연결한다.
+ *   RTS -> EN (리셋),  DTR -> GPIO0 (부트)
+ * 그런데 브라우저와 pyserial 은 포트를 열 때 이 신호를 활성화하는 것이
+ * 기본 동작이다. 그러면 여는 순간 보드가 리셋 상태로 붙잡혀서 아무 데이터도
+ * 오지 않는다. 연결은 됐는데 화면이 비어 있던 원인이 이것이었다.
+ */
+async function releaseResetLine() {
+  try {
+    await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+  } catch (e) { /* 지원하지 않는 환경이면 무시 */ }
+}
+
+/*
+ * TextDecoderStream + pipeTo 를 쓰지 않는다.
+ *
+ * pipeTo 는 port.readable 을 잠근 채로 남아서, 끊을 때 port.close() 가
+ * 실패한다. 그러면 포트가 닫히지 않아 다시 연결할 수 없다.
+ * 리더를 직접 잡고 디코딩하면 해제 순서를 우리가 통제할 수 있다.
+ */
+async function readLoop() {
+  var decoder = new TextDecoder();
+  var buf = '';
+
+  try {
+    reader = port.readable.getReader();
+    while (keepReading) {
+      var res = await reader.read();
+      if (res.done) break;
+
+      lastRxAt = performance.now();
+      buf += decoder.decode(res.value, { stream: true });
+
+      var i = buf.indexOf(NL);
+      while (i >= 0) {
+        var line = buf.slice(0, i);
+        if (line.charAt(line.length - 1) === CR) line = line.slice(0, -1);
+        buf = buf.slice(i + 1);
+        if (line) handleLine(line);
+        i = buf.indexOf(NL);
+      }
+      if (buf.length > 8192) buf = '';   // 개행이 안 오는 쓰레기 방어
+    }
+  } catch (e) {
+    if (keepReading) appendLog('읽기 오류: ' + e.message);
+  } finally {
+    if (reader) {
+      try { reader.releaseLock(); } catch (e) {}
+      reader = null;
+    }
+  }
+}
+
+async function disconnect() {
+  keepReading = false;
+
+  // 순서가 중요하다: 리더를 취소·해제한 뒤에야 포트가 닫힌다
+  try { if (reader) await reader.cancel(); } catch (e) {}
+  for (var i = 0; i < 40 && reader; i++) { await sleep(25); }
+
+  try {
+    if (port) await port.close();
+  } catch (e) {
+    appendLog('포트 닫기 실패: ' + e.message);
+  }
+  port = null;
+
+  $('connect').disabled = false;
+  $('disconnect').disabled = true;
+  $('reset').disabled = true;
+  setStatus('연결 해제됨');
+  appendLog('--- 연결 해제 ---');
+}
+
+/*
+ * 보드 리셋.
+ *
+ * ESP32-S3 의 USB-Serial-JTAG 은 RTS 가 EN(리셋), DTR 이 GPIO0(부트) 에
+ * 물려 있다. RTS 를 잠깐 걸었다 놓으면 재부팅되면서 부팅 로그가 나온다.
+ * 브라우저는 부팅이 끝난 뒤에 붙으므로 부팅 로그를 놓친다. 문제가 있을 때
+ * 이걸로 처음부터 다시 본다.
+ */
+/*
+ * 보드 리셋.
+ *
+ * ESP32-S3 는 USB 컨트롤러가 칩 안에 있다. 별도 USB-시리얼 칩이 달린 보드와
+ * 달리, 칩을 리셋하면 USB 장치 자체가 사라졌다가 다시 나타난다.
+ * 그러면 브라우저가 들고 있던 포트 핸들이 죽은 상태가 되어, 연결된 것처럼
+ * 보이는데 데이터는 영영 오지 않는다.
+ *
+ * 그래서 리셋 신호를 보낸 뒤 포트를 닫고 다시 여는 것까지 자동으로 한다.
+ * 같은 장치라면 사용자가 다시 고르지 않아도 되도록 getPorts() 로 찾는다.
+ */
+async function resetBoard() {
+  if (!port) return;
+
+  var info = null;
+  try { info = port.getInfo(); } catch (e) {}
+
+  appendLog('--- 보드 리셋 ---');
+  try {
+    await port.setSignals({ dataTerminalReady: false, requestToSend: true });
+    await sleep(120);
+    await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+  } catch (e) {
+    appendLog('리셋 신호 실패: ' + e.message);
+  }
+
+  setStatus('리셋 후 재연결 중...');
+  await disconnect();
+  await sleep(1200);            // USB 재열거를 기다린다
+  await reconnect(info);
+}
+
+/* 사용자에게 다시 묻지 않고, 이미 허가된 같은 장치로 다시 붙는다 */
+async function reconnect(info) {
+  var list = [];
+  try { list = await navigator.serial.getPorts(); } catch (e) {}
+
+  var target = null;
+  for (var i = 0; i < list.length; i++) {
+    var pi = null;
+    try { pi = list[i].getInfo(); } catch (e) {}
+    if (!info || !pi
+        || (pi.usbVendorId === info.usbVendorId && pi.usbProductId === info.usbProductId)) {
+      target = list[i];
+      break;
+    }
+  }
+  if (!target) {
+    setStatus('재연결할 포트를 찾지 못했습니다 — "연결"을 다시 눌러주세요', true);
+    return;
+  }
+
+  for (var attempt = 0; attempt < 5; attempt++) {
+    try {
+      await target.open({ baudRate: 115200 });
+      port = target;
+      await releaseResetLine();
+      $('connect').disabled = true;
+      $('disconnect').disabled = false;
+      $('reset').disabled = false;
+      $('save').disabled = false;
+      setStatus('재연결됨 — 부팅 로그를 기다립니다');
+      appendLog('--- 재연결됨 ---');
+      keepReading = true;
+      lastRxAt = performance.now();
+      readLoop();
+      watchIdle();
+      return;
+    } catch (e) {
+      await sleep(500);
+    }
+  }
+  setStatus('재연결 실패 — "연결"을 다시 눌러주세요', true);
+}
+
+/* 데이터가 안 들어오면 원인을 안내한다 */
+function watchIdle() {
+  if (!keepReading) return;
+  if (performance.now() - lastRxAt > 3000 && hist.length === 0) {
+    setStatus('연결은 됐는데 데이터가 없습니다 — "보드 리셋"을 눌러보세요', true);
+  }
+  setTimeout(watchIdle, 1000);
+}
+
+function setStatus(t, warn) {
+  $('status').textContent = t;
+  $('status').className = warn ? 'warn' : '';
+}
+
+/* ---------------------------------------------------------- 파싱 */
+
+function handleLine(line) {
+  lines.push(line);
+  if (lines.length > 20000) lines.shift();
+
+  if (line.indexOf('TUNE,') !== 0) {
+    appendLog(line);        // 부팅 로그·경고 등은 그대로 보여준다
+    return;
+  }
+
+  var p = line.split(',');
+  if (p.length < 10) return;
+
+  var d = {
+    t: +p[1], g: p[2],
+    v: +p[3], h: +p[4], total: +p[5],
+    peak: +p[6], gyro: +p[7], strokes: +p[8],
+    tilt: +p[9], ma: p.length > 10 ? +p[10] : 0
+  };
+
+  rxCount++;
+  hist.push(d);
+  if (hist.length > HIST_MAX) hist.shift();
+  render(d);
+}
+
+var lastGesture = null;
+
+function render(d) {
+  var c = COLORS[d.g] || ['#6b7280', d.g];
+  if (d.g !== lastGesture) {
+    lastGesture = d.g;
+    appendLog('> ' + d.g
+      + '  V=' + d.v.toFixed(2)
+      + ' H=' + d.h.toFixed(2)
+      + ' peak=' + d.peak.toFixed(2)
+      + ' gyro=' + d.gyro.toFixed(0)
+      + ' str=' + d.strokes);
+  }
+  $('gesture').textContent = d.g;
+  $('gesture').style.color = c[0];
+  $('gname').textContent = c[1];
+  setStatus('수신 중');
+
+  setBar('V', d.v, SCALE.v, 2);
+  setBar('H', d.h, SCALE.h, 2);
+  setBar('T', d.total, SCALE.t, 2);
+  setBar('P', d.peak, SCALE.p, 2);
+  setBar('G', d.gyro, SCALE.g, 0);
+
+  $('sStroke').textContent = d.strokes;
+  $('sTilt').textContent = d.tilt.toFixed(0) + '°';
+  $('sMa').textContent = d.ma.toFixed(0);
+
+  var now = performance.now();
+  if (now - lastHzAt > 1000) {
+    $('sHz').textContent = (rxCount * 1000 / (now - lastHzAt)).toFixed(0);
+    rxCount = 0;
+    lastHzAt = now;
+  }
+}
+
+function setBar(id, val, scale, digits) {
+  $('v' + id).textContent = val.toFixed(digits);
+  $('f' + id).style.width = Math.min(100, (val / scale) * 100) + '%';
+}
+
+/* ---------------------------------------------------------- 그래프 */
+
+var cv = $('chart'), ctx = cv.getContext('2d');
+
+function resize() {
+  var r = cv.getBoundingClientRect();
+  cv.width = r.width * devicePixelRatio;
+  cv.height = r.height * devicePixelRatio;
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+}
+addEventListener('resize', resize);
+
+function draw() {
+  var w = cv.width / devicePixelRatio, h = cv.height / devicePixelRatio;
+  ctx.clearRect(0, 0, w, h);
+
+  var MAX = 3.0;   // 세로축 상한 (g)
+  function y(v) { return h - (Math.min(v, MAX) / MAX) * (h - 10) - 5; }
+
+  // 임계선 — 지금 값이 판정선에 얼마나 가까운지 눈으로 보라고 그린다
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = '#e0b05066';
+  ctx.lineWidth = 1;
+  var marks = [[TH.idle, 'IDLE ' + TH.idle], [TH.vigRms, '격하게 ' + TH.vigRms.toFixed(1)]];
+  for (var m = 0; m < marks.length; m++) {
+    ctx.beginPath();
+    ctx.moveTo(0, y(marks[m][0]));
+    ctx.lineTo(w, y(marks[m][0]));
+    ctx.stroke();
+    ctx.fillStyle = '#e0b050aa';
+    ctx.font = '10px sans-serif';
+    ctx.fillText(marks[m][1], 4, y(marks[m][0]) - 3);
+  }
+  ctx.setLineDash([]);
+
+  if (hist.length < 2) {
+    ctx.fillStyle = '#5b6472';
+    ctx.font = '12px sans-serif';
+    ctx.fillText('데이터 대기 중...', 10, h / 2);
+    return;
+  }
+
+  var step = w / (HIST_MAX - 1);
+  var series = [['v', '#c56bd6'], ['h', '#3fb6c8'], ['total', '#5b8ff9']];
+  for (var s = 0; s < series.length; s++) {
+    ctx.beginPath();
+    ctx.strokeStyle = series[s][1];
+    ctx.lineWidth = 1.6;
+    for (var i = 0; i < hist.length; i++) {
+      var px = i * step, py = y(hist[i][series[s][0]]);
+      if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+    }
+    ctx.stroke();
+  }
+}
+setInterval(draw, 60);
+
+/* ---------------------------------------------------------- 기타 */
+
+function appendLog(t) {
+  var el = $('log');
+  var stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 4;
+  el.textContent += t + NL;
+  if (el.textContent.length > 40000) el.textContent = el.textContent.slice(-30000);
+  if (stick) el.scrollTop = el.scrollHeight;
+}
+
+$('connect').onclick = connect;
+$('disconnect').onclick = disconnect;
+$('reset').onclick = resetBoard;
+$('clear').onclick = function () { $('log').textContent = ''; hist.length = 0; };
+$('save').onclick = function () {
+  var blob = new Blob([lines.join(NL)], { type: 'text/csv' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  var stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  a.download = 'crown-log-' + stamp + '.csv';
+  a.click();
+};
+
+resize();
+draw();
+</script>
+</body>
+</html>
