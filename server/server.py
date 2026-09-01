@@ -290,7 +290,7 @@ async def handle_stick(request):
         # "몇 초 전 것인지" 를 같이 알려주기 위해서다.
         STICK[0] = (time.monotonic(), payload)
 
-        n = await ROOMS.broadcast(room, dict(payload, age=0))
+        n = await ROOMS.broadcast(dict(payload, age=0))
         return web.json_response({"ok": True, "delivered": n})
 
     else:
@@ -351,12 +351,17 @@ async def handle_status(request):
         got_at, payload = STICK[0]
         stick = dict(payload, age=int(time.monotonic() - got_at))
 
-    return web.json_response({
+    out = {
         "connected": ROOMS.total(),
         "stick": stick,
         "motions": cfg["motions"],
         "recent": list(ROOMS.log)[-10:],
-    })
+    }
+    # 같은 컴퓨터에서 물어보면 열쇠도 준다. test.html 이 이걸로 자동으로 채운다.
+    # 확장이 붙을 때와 같은 기준이다 — localhost 면 같은 컴퓨터가 증명된다.
+    if is_local(request):
+        out["token"] = request.app["token"]
+    return web.json_response(out)
 
 
 def _page(name):
