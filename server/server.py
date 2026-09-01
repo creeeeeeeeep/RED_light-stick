@@ -81,6 +81,28 @@ def load_config():
     return merged
 
 
+def lan_ip():
+    """
+    이 PC 가 공유기에서 받은 주소.
+
+    봉은 다른 기기라서 localhost 로는 못 온다. 이 주소로 와야 한다.
+    팬이 직접 찾아 넣게 하면 거기서 대부분 막히므로, 서버가 알아내서
+    확장에 알려주고 설정 페이지가 자동으로 채운다.
+
+    바깥으로 실제 패킷을 보내지는 않는다. UDP 소켓에 목적지를 지정하면
+    OS 가 어느 랜카드를 쓸지 정하는데, 그때 정해진 주소를 읽는 것뿐이다.
+    """
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
 def short(room):
     """
     콘솔에 방 코드를 통째로 찍지 않는다.
@@ -305,7 +327,11 @@ async def handle_ws(request):
     await ROOMS.add(room, ws, request.query.get("cid") or "")
 
     try:
-        await ws.send_str(json.dumps({"action": "hello", "room": room}))
+        await ws.send_str(json.dumps({
+            "action": "hello", "room": room,
+            # 봉의 설정 페이지가 이걸로 서버 주소 칸을 자동으로 채운다
+            "stickUrl": f"http://{lan_ip()}:{request.app['port']}",
+        }))
         # 봉이 방금 보고했을 수도 20분 전일 수도 있다. 있으면 보여주되,
         # 몇 초 전 것인지 반드시 같이 준다.
         #
@@ -484,9 +510,10 @@ async def handle_launchpad(request):
     })
 
 
-def build_app(cfg):
+def build_app(cfg, port=8787):
     app = web.Application()
     app["cfg"] = cfg
+    app["port"] = port
     app.router.add_post("/api/stick", handle_stick)
     app.router.add_get("/ws", handle_ws)
     app.router.add_get("/api/status", handle_status)
@@ -524,7 +551,7 @@ def main():
     LOG.info("봉 시뮬레이터:  http://localhost:%d/test", args.port)
     LOG.info("모션 모니터:    http://localhost:%d/monitor", args.port)
 
-    web.run_app(build_app(cfg), host=args.host, port=args.port, print=None)
+    web.run_app(build_app(cfg, args.port), host=args.host, port=args.port, print=None)
 
 
 if __name__ == "__main__":

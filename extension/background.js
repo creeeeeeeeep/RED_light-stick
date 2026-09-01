@@ -28,6 +28,7 @@ let lastDispatch = '아직 없음';
  * 봉이 서버를 거쳐 보내온 마지막 상태. USB 없이도 설정 페이지에서
  * 봉이 살아 있는지 보려고 여기 들고 있는다.
  */
+let stickUrl = '';
 let lastStick = null;
 let lastStickAt = 0;
 
@@ -263,6 +264,12 @@ function handleServerMessage(raw) {
     break;
   case 'hello':
     log('서버 연결됨, room =', m.room);
+    /*
+     * 서버가 알려주는 "봉이 써야 할 주소". 서버는 팬의 PC 에서 도는데,
+     * 봉은 다른 기기라 localhost 로는 못 온다. 공유기가 준 주소로 와야 한다.
+     * 팬이 직접 찾게 하면 거기서 대부분 막히므로 설정 페이지가 이걸로 채운다.
+     */
+    if (m.stickUrl) stickUrl = m.stickUrl;
     break;
   case 'stick':
     /*
@@ -446,6 +453,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         connected: !!ws && ws.readyState === WebSocket.OPEN,
         lastError,
         lastDispatch,
+        stickUrl,
         stick: lastStick,
         stickAgoSec: lastStickAt ? Math.round((Date.now() - lastStickAt) / 1000) : null,
         targetTabId: tabId,

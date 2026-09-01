@@ -365,6 +365,15 @@ async function readRelay() {
     return;
   }
 
+  /*
+   * 서버 주소는 팬이 찾아 넣기 가장 어려운 값이다. 서버가 자기 주소를
+   * 알려주므로, 비어 있으면 그대로 채운다. 이미 뭔가 적어 뒀으면 건드리지 않는다.
+   */
+  if (st.stickUrl && !$('server').value.trim() && document.activeElement !== $('server')) {
+    $('server').value = st.stickUrl;
+    log('서버 주소를 자동으로 채웠습니다: ' + st.stickUrl);
+  }
+
   const room = $('room').value.trim();
   if (st.connected) {
     const same = !room || st.room === room;
