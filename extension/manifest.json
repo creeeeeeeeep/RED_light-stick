@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "크라운 응원봉",
-  "version": "0.4.0",
+  "version": "0.8.0",
   "description": "응원봉을 흔들면 치지직 채팅에 이모티콘이 쌓이고, 버튼을 누르면 전송됩니다.",
   "permissions": [
     "storage",

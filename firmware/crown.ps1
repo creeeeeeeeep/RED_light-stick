@@ -333,8 +333,43 @@ console_baudrate = 115200
         }
         $old = Get-Version
         Set-Content 'version.txt' $Arg -NoNewline -Encoding ascii
-        Write-Host "$old  ->  $Arg" -ForegroundColor Green
+        Write-Host "펌웨어  $old  ->  $Arg" -ForegroundColor Green
+
+        <#
+          확장 버전도 같이 올린다.
+
+          따로 두면 반드시 어긋난다 — 실제로 확장이 0.4.0 에 멈춰 있는 동안
+          코드가 네 번 바뀌었다. 숫자가 같으면 "이 봉과 이 확장은 한 세트"
+          라고 말할 수 있어서 팬에게 안내하기도 쉽다.
+
+          manifest.json 과 inject.js 두 곳에 있다. inject.js 쪽은 콘솔 배너와
+          crown.diag() 에 찍히는 값이다.
+        #>
+        $ext = Join-Path (Split-Path $PSScriptRoot -Parent) 'extension'
+        if (-not (Test-Path $ext)) { $ext = $env:CROWN_EXTENSION_DIR }
+
+        if ($ext -and (Test-Path $ext)) {
+            foreach ($f in @(
+                @{ path = 'manifest.json'; pat = '("version"\s*:\s*")[^"]+(")' },
+                @{ path = 'inject.js';     pat = "(const VERSION = ')[^']+(')" }
+            )) {
+                $full = Join-Path $ext $f.path
+                if (-not (Test-Path $full)) { continue }
+                $txt = [System.IO.File]::ReadAllText($full)
+                $new = [regex]::Replace($txt, $f.pat, "`${1}$Arg`${2}", 1)
+                if ($new -ne $txt) {
+                    [System.IO.File]::WriteAllText($full, $new,
+                        (New-Object System.Text.UTF8Encoding $false))
+                    Write-Host "확장    $($f.path) 갱신" -ForegroundColor Green
+                }
+            }
+        } else {
+            Write-Host "확장 폴더를 못 찾아 건너뜁니다 (CROWN_EXTENSION_DIR 로 지정 가능)" -ForegroundColor DarkGray
+        }
+
+        Write-Host ""
         Write-Host "다시 빌드해야 봉이 새 버전으로 인식합니다."
+        Write-Host "확장은 chrome://extensions 에서 새로고침하면 됩니다."
     }
 
     'status' {
