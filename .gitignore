@@ -24,8 +24,8 @@ sdkconfig.old
 sdkconfig.devbuild
 sdkconfig.devbuild.old
 
-# 바탕화면의 firmware/ 는 사본이다. 진짜는 C:\esp\cheerstick 에 있다.
 firmware/build/
+firmware/build_dev/
 
 # 잡동사니 -----------------------------------------------------------------
 __pycache__/

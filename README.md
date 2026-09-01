@@ -18,8 +18,8 @@ RED레드 채널 팬들에게 **무상 배포**할 목적으로 만든다 (판�
 |---|---|---|
 | `firmware/` | 봉 펌웨어 — 모션 인식, LED, WiFi, OTA | C (ESP-IDF v5.5) |
 | `server/` | 중계 서버 | Python (aiohttp) |
-| `chzzk/extension/` | 크롬 확장 — 채팅에 이모티콘을 넣는다 | JS (Manifest V3) |
-| `chzzk/` | 치지직 내부 구조 조사 기록 | 문서 + 조사 스크립트 |
+| `extension/` | 크롬 확장 — 채팅에 이모티콘을 넣는다 | JS (Manifest V3) |
+| `docs/` | 치지직 내부 구조 조사 기록 | 문서 + 조사 스크립트 |
 
 하드웨어는 **Waveshare ESP32-S3-Matrix** (8x8 WS2812 + QMI8658 6축 IMU) 하나로,
 LED와 IMU가 보드에 이미 붙어 있어 **전송 버튼만 납땜하면 된다** (GPIO2 + GND).
@@ -44,7 +44,7 @@ LED와 IMU가 보드에 이미 붙어 있어 **전송 버튼만 납땜하면 된
 cd server && py -m pip install aiohttp && py server.py
 
 # 2. 확장 — chrome://extensions 에서 "압축해제된 확장 프로그램 로드"
-#    → chzzk/extension 폴더 선택
+#    → extension 폴더 선택
 
 # 3. 펌웨어
 cd firmware && .\crown.bat        # 인자 없이 실행하면 메뉴가 뜬다
