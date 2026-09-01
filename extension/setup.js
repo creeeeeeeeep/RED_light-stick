@@ -20,6 +20,7 @@ let keepReading = false;
 
 /* 명령을 보내고 OK/ERR 가 올 때까지 기다리는 용도 */
 let pending = null;      // { resolve, reject, lines, timer }
+let serverToken = '';    // 서버가 알려준 열쇠. 봉에 그대로 써넣는다.
 
 function log(msg) {
   const el = $('log');
@@ -242,11 +243,10 @@ async function save() {
   const ssid   = $('ssidList').value.trim();
   const pass   = $('pass').value;
   const server = $('server').value.trim();
-  const room   = $('room').value.trim();
-  const token  = $('token').value.trim();
 
   if (!ssid)   return log('WiFi 를 선택하세요.');
-  if (!server) return log('서버 주소를 입력하세요.');
+  if (!server) return log('서버가 켜져 있지 않습니다. 서버를 먼저 켜 주세요.');
+  if (!serverToken) return log('서버에서 열쇠를 받지 못했습니다. 서버를 먼저 켜 주세요.');
 
   let wsUrl;
   try {
@@ -258,16 +258,15 @@ async function save() {
   try {
     $('save').disabled = true;
 
-    await send('SERVER ' + quote(server));      log('서버 주소 저장');
-    await send('ROOM ' + quote(room));          log('방 코드 저장');
-    await send('TOKEN ' + quote(token));        log('토큰 저장');
+    await send('SERVER ' + quote(server));       log('서버 주소 저장');
+    /* 방은 안 쓰지만 옛 펌웨어가 값을 요구하므로 고정값을 넣는다 */
+    await send('ROOM local');
+    await send('TOKEN ' + quote(serverToken));   log('열쇠 저장');
     await send('WIFI ' + quote(ssid) + ' ' + quote(pass), 8000);
     log('WiFi 저장, 접속 시도 중…');
 
     // 확장에도 같은 값을 저장한다 — 팬이 코드를 옮겨 적을 필요가 없다
-    await chrome.storage.local.set({
-      serverUrl: wsUrl, room, token, enabled: true,
-    });
+    await chrome.storage.local.set({ serverUrl: wsUrl, enabled: true });
     await chrome.runtime.sendMessage({ type: 'crown-bg-reconnect' }).catch(() => {});
     log('확장에도 저장했습니다.');
 
@@ -369,19 +368,16 @@ async function readRelay() {
    * 서버 주소는 팬이 찾아 넣기 가장 어려운 값이다. 서버가 자기 주소를
    * 알려주므로, 비어 있으면 그대로 채운다. 이미 뭔가 적어 뒀으면 건드리지 않는다.
    */
-  if (st.stickUrl && !$('server').value.trim() && document.activeElement !== $('server')) {
+  if (st.stickUrl && $('server').value !== st.stickUrl) {
     $('server').value = st.stickUrl;
-    log('서버 주소를 자동으로 채웠습니다: ' + st.stickUrl);
   }
+  if (st.serverToken) serverToken = st.serverToken;
 
-  const room = $('room').value.trim();
   if (st.connected) {
-    const same = !room || st.room === room;
-    setV('stRoom', st.room + (same ? '  —  서버 연결됨' : '  —  이 페이지의 방과 다릅니다'),
-         same ? 'ok' : 'no');
-    markDone('step3', same);
+    setV('stRoom', '서버 연결됨', 'ok');
+    markDone('step3', true);
   } else {
-    setV('stRoom', st.lastError || '서버에 붙지 못했습니다', 'no');
+    setV('stRoom', st.lastError || '서버가 켜져 있지 않습니다', 'no');
     markDone('step3', false);
   }
 
@@ -456,16 +452,6 @@ $('applyLed').onclick = async () => {
     $('applyLed').disabled = !writer;
   }
 };
-/*
- * 방 코드와 토큰은 한 쌍이다. 서버는 방을 처음 본 순간 그 토큰으로 등록하고
- * 이후로는 그 토큰만 받는다. 그러니 토큰만 바꾸면 그 방에 다시 못 들어간다.
- * 항상 둘을 같이 새로 만든다.
- */
-function newPair() {
-  $('room').value = 'crown-' + randomCode(12);
-  $('token').value = randomCode(32);
-}
-$('regen').onclick = newPair;
 $('showPass').onchange = (e) => {
   $('pass').type = e.target.checked ? 'text' : 'password';
 };
@@ -474,13 +460,7 @@ $('showPass').onchange = (e) => {
 setInterval(refreshState, 5000);
 
 (async function init() {
-  const cur = await chrome.storage.local.get({ serverUrl: '', room: '', token: '' });
-  if (cur.room && cur.token) {
-    $('room').value = cur.room;
-    $('token').value = cur.token;
-  } else {
-    newPair();
-  }
+  const cur = await chrome.storage.local.get({ serverUrl: '' });
   refreshState();
 
   if (cur.serverUrl) {

@@ -102,20 +102,11 @@
       봉이 신호를 보낼 주소입니다. 방 코드는 자동으로 만들어지고 확장에도 같이 저장되므로
       직접 입력할 필요가 없습니다.
     </p>
-    <label>서버 주소</label>
-    <input id="server" placeholder="http://192.168.0.10:8787">
-    <label>방 코드와 열쇠 <span class="pill">자동 생성</span></label>
-    <div class="row">
-      <div>
-        <input id="room" readonly>
-        <input id="token" readonly style="margin-top:6px; color:#8a9099; font-size:12px;">
-      </div>
-      <button id="regen">새로 만들기</button>
-    </div>
-    <p class="hint" style="margin-top:6px;">
-      이 둘은 한 쌍입니다. 봉과 이 브라우저를 짝지어 주는 값이라
-      다른 사람과 겹치지 않고, 직접 적어 둘 필요도 없습니다.
-      &ldquo;새로 만들기&rdquo;를 누르면 둘 다 새로 바뀝니다.
+    <label>서버 주소 <span class="pill">자동</span></label>
+    <input id="server" placeholder="서버를 켜면 자동으로 채워집니다" readonly>
+    <p class="hint" style="margin-top:.6rem;">
+      서버는 <b>이 컴퓨터에서</b> 돕니다. 주소와 열쇠는 서버가 알려주므로
+      직접 적을 것이 없습니다.
     </p>
   </div>
 

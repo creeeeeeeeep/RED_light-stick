@@ -14,6 +14,8 @@
   봉을 흔들어도 확장이 자고 있어 반응하지 않을 수 있다.
 * 확장 쪽 네트워크 연결은 반드시 백그라운드(서비스워커)에서 한다.
   콘텐츠 스크립트는 치지직 페이지의 CSP 를 따르므로 외부 서버 연결이 막힌다.
+* 이 서버는 팬 각자의 컴퓨터에서 돈다. 봉도 브라우저도 같은 집 안에 있으니
+  바깥에 둘 이유가 없다. 그래서 방(room) 개념이 없다 — 나눌 상대가 없다.
 
 --------------------------------------------------------------------------
 실행
@@ -28,8 +30,10 @@
 --------------------------------------------------------------------------
 주의
 --------------------------------------------------------------------------
-로컬 테스트용이라 평문 HTTP 다. 인터넷에 올릴 때는 반드시 HTTPS/WSS 뒤에
-두어야 한다. 확장은 https 페이지에서 동작하므로 ws:// 로는 붙지 못한다.
+집 안에서만 도는 것을 전제로 평문 HTTP 를 쓴다. 확장은 같은 컴퓨터에서
+ws://localhost 로 붙으므로 이것으로 충분하다.
+
+인터넷에 내놓을 생각이라면 그때는 HTTPS/WSS 와 방 개념이 다시 필요하다.
 """
 
 import argparse
@@ -50,12 +54,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "config.json")
 
 DEFAULT_CONFIG = {
-    # 봉과 확장이 같은 방에 있어야 서로 연결된다.
-    "room": "crown-test",
-    # 스트리머 본인용 만능 키. test.html / monitor 같은 도구가 쓴다.
-    # 팬의 봉과 확장은 이걸 몰라도 된다 — 설정 페이지가 방마다 따로 만들고
-    # 서버가 rooms.json 에 등록한다.
-    "admin_token": "change-me",
+    # 봉이 쓰는 열쇠. 비워 두면 처음 켤 때 서버가 만들어 여기에 적는다.
+    # 설정 페이지가 이 값을 받아 봉에 써넣으므로 사람이 볼 일은 없다.
+    "token": "",
     # 모션 → 이모티콘. 여기만 고치면 봉을 다시 플래시하지 않아도 된다.
     "motions": {
         "SWAY_LR":  "redredMinidance1",   # 좌우로 흔들기
@@ -103,143 +104,136 @@ def lan_ip():
         s.close()
 
 
-def short(room):
+# ------------------------------------------------------------- 붙어 있는 확장
+class Clients:
     """
-    콘솔에 방 코드를 통째로 찍지 않는다.
+    붙어 있는 확장들. 방으로 나누지 않는다 — 서버가 팬마다 자기 컴퓨터에서
+    도므로 나눌 상대가 없다. 봉 이벤트는 붙어 있는 전부에게 간다.
 
-    이 서버 창은 스트리머 화면에 떠 있을 수 있고, 여기 흐르는 건 팬들의
-    방 코드다. 어느 방인지 구분할 만큼만 남기면 충분하다.
+    탭을 여러 개 열면 확장 하나가 여러 번 붙을 수 있어서 집합으로 든다.
     """
-    room = str(room or "")
-    return room[:10] + "…" if len(room) > 10 else room
-
-
-# ---------------------------------------------------------------- 방 관리
-class Rooms:
-    """방 하나당 확장 WebSocket 여러 개가 붙을 수 있다 (탭 여러 개 등)."""
 
     def __init__(self):
-        self._clients = defaultdict(set)
+        self._clients = set()
         self._cid = {}                # ws -> 확장 설치본 id
         self.log = deque(maxlen=50)   # 최근 이벤트 (테스트 페이지에서 확인용)
 
-    async def add(self, room, ws, cid=""):
+    async def add(self, ws, cid=""):
         """
         같은 확장이 이미 붙어 있으면 옛 소켓을 끊는다.
 
         확장의 서비스워커는 수시로 죽었다 살아나는데, 그때 새 소켓을 열면서
-        옛 소켓이 여기 남아 있을 수 있다. 그대로 두면 한 방에 소켓이 둘이 되고
-        이벤트가 두 번씩 배달된다 — 이모티콘이 두 개씩 들어간다.
+        옛 소켓이 여기 남아 있을 수 있다. 그대로 두면 이벤트가 두 번씩
+        배달된다 — 이모티콘이 두 개씩 들어간다.
         """
         if cid:
-            for old in [w for w in self._clients[room] if self._cid.get(w) == cid]:
-                LOG.info("같은 확장의 옛 연결을 끊습니다: room=%s", short(room))
-                self._clients[room].discard(old)
+            for old in [w for w in self._clients if self._cid.get(w) == cid]:
+                LOG.info("같은 확장의 옛 연결을 끊습니다")
+                self._clients.discard(old)
                 self._cid.pop(old, None)
                 try:
                     await old.close(code=4000, message=b"replaced")
                 except Exception:
                     pass
 
-        self._clients[room].add(ws)
+        self._clients.add(ws)
         if cid:
             self._cid[ws] = cid
-        LOG.info("확장 연결: room=%s (총 %d)", short(room), len(self._clients[room]))
+        LOG.info("확장 연결 (총 %d)", len(self._clients))
 
-    def remove(self, room, ws):
-        self._clients[room].discard(ws)
+    def remove(self, ws):
+        self._clients.discard(ws)
         self._cid.pop(ws, None)
-        if not self._clients[room]:
-            self._clients.pop(room, None)
-        LOG.info("확장 해제: room=%s", short(room))
+        LOG.info("확장 해제 (남은 %d)", len(self._clients))
 
-    def count(self, room):
-        return len(self._clients.get(room, ()))
+    def total(self):
+        return len(self._clients)
 
-    async def broadcast(self, room, payload):
-        targets = list(self._clients.get(room, ()))
+    async def broadcast(self, payload):
+        targets = list(self._clients)
         if not targets:
-            LOG.warning("room=%s 에 연결된 확장이 없습니다 — 이벤트를 버립니다", short(room))
+            LOG.warning("붙어 있는 확장이 없습니다 — 이벤트를 버립니다")
             return 0
 
         data = json.dumps(payload, ensure_ascii=False)
         sent = 0
         for ws in targets:
             if ws.closed:
-                self.remove(room, ws)
+                self.remove(ws)
                 continue
             try:
                 await ws.send_str(data)
                 sent += 1
             except Exception as e:
                 LOG.warning("전송 실패, 연결을 정리합니다: %s", e)
-                self.remove(room, ws)
+                self.remove(ws)
         return sent
 
 
-ROOMS = Rooms()
+ROOMS = Clients()
 
-# 방마다 마지막으로 받은 봉 상태. 확장이 나중에 붙어도 바로 보여줄 수 있다.
-STICKS = {}
+# 마지막으로 받은 봉 상태. 확장이 나중에 붙어도 바로 보여줄 수 있다.
+# [(받은 시각, 내용)] 한 칸짜리 상자.
+STICK = [None]
 
 
 # ---------------------------------------------------------------- 핸들러
-# ------------------------------------------------------------------ 방 등록부
+# --------------------------------------------------------------------- 열쇠
 
-ROOMS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rooms.json")
-_registry = None
+"""
+방(room) 개념은 없앴다.
 
+방은 여러 팬이 하나의 서버를 나눠 쓸 때 서로를 가르려고 있던 것이다. 서버가
+팬마다 자기 컴퓨터에서 도는 지금 구조에서는 나눌 상대가 없다. 그런데도 봉과
+확장이 같은 방 이름을 들고 있어야 해서, 한쪽 설정만 지워지면 둘 다 멀쩡히
+서버에 붙은 채로 아무 일도 안 일어났다. 실제로 그 상태를 두 번 겪었다.
 
-def _load_registry():
-    """방 코드 -> 토큰. 팬마다 하나씩 생긴다."""
-    global _registry
-    if _registry is None:
-        try:
-            with io.open(ROOMS_FILE, encoding="utf-8") as f:
-                _registry = json.load(f)
-        except Exception:
-            _registry = {}
-    return _registry
+지금은 서버에 오는 봉 이벤트를 붙어 있는 확장 전부에게 보낸다.
 
+남은 것은 열쇠(token) 하나다. 같은 WiFi 에 있는 다른 사람이 내 채팅에
+이모티콘을 쏘는 것만 막으면 되고, 그건 값 하나로 충분하다.
 
-def _save_registry():
-    tmp = ROOMS_FILE + ".tmp"
-    with io.open(tmp, "w", encoding="utf-8") as f:
-        json.dump(_registry, f, indent=2, ensure_ascii=False)
-    os.replace(tmp, ROOMS_FILE)
+  확장  ws://localhost 로만 붙는다 -> 같은 컴퓨터인 게 증명되므로 열쇠가 필요 없다.
+                                     접속하면 서버가 열쇠를 알려준다.
+  봉    LAN 을 건너오므로 열쇠를 실어야 한다. 설정 페이지가 위에서 받은 열쇠를
+        봉에 써넣는다. 팬은 여전히 아무것도 입력하지 않는다.
+"""
 
 
-def check_room_token(room, token, cfg):
+def same_token(a, b):
     """
-    방의 토큰을 확인한다. 처음 보는 방이면 그 토큰으로 등록한다.
+    열쇠 비교. 타이밍 공격을 피하려고 compare_digest 를 쓴다.
 
-    팬이 코드를 옮겨 적지 않게 하려면, 설정 페이지가 만든 값을 서버가
-    그대로 받아들이는 수밖에 없다. 방 코드가 충분히 길고 무작위라
-    남이 먼저 채가려면 그 코드를 맞혀야 하는데, 그건 현실적으로 어렵다.
-
-    스트리머 본인은 config.json 의 admin_token 으로 아무 방에나 들어간다
-    (test.html, monitor 같은 도구용).
+    문자열을 그대로 넘기면 안 된다 — ASCII 가 아닌 값이 오면 TypeError 를
+    던져서 서버가 500 으로 죽는다. 열쇠는 바깥에서 오는 값이므로 무엇이든
+    올 수 있다. 바이트로 바꿔 비교한다.
     """
-    if not token:
-        return False
+    return secrets.compare_digest(str(a or "").encode("utf-8"),
+                                  str(b or "").encode("utf-8"))
 
-    admin = str(cfg.get("admin_token") or "")
-    if admin and secrets.compare_digest(token, admin):
-        return True
 
-    reg = _load_registry()
-    known = reg.get(room)
+def get_token(cfg):
+    """서버의 열쇠. 없으면 만들어 config.json 에 적어둔다."""
+    tok = str(cfg.get("token") or "")
+    if len(tok) >= 16 and tok != "change-me":
+        return tok
 
-    if known is None:
-        if len(room) < 8:
-            LOG.warning("방 코드가 너무 짧아 등록을 거절: %s", short(room))
-            return False
-        reg[room] = token
-        _save_registry()
-        LOG.info("새 방 등록: %s", short(room))
-        return True
+    tok = secrets.token_urlsafe(24)
+    cfg["token"] = tok
+    try:
+        with io.open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        LOG.info("열쇠를 새로 만들어 config.json 에 저장했습니다")
+    except Exception as e:
+        LOG.warning("열쇠를 저장하지 못했습니다 (다음 실행 때 다시 만듭니다): %s", e)
+    return tok
 
-    return secrets.compare_digest(token, str(known))
+
+def is_local(request):
+    """같은 컴퓨터에서 온 연결인가."""
+    peer = request.transport.get_extra_info("peername") if request.transport else None
+    host = peer[0] if peer else ""
+    return host in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
 
 
 async def handle_stick(request):
@@ -247,11 +241,10 @@ async def handle_stick(request):
     봉이 보내는 이벤트.
 
         POST /api/stick
-        { "room": "...", "token": "...", "action": "add", "motion": "SWAY_LR" }
-        { "room": "...", "token": "...", "action": "send" }
+        { "token": "...", "action": "add", "motion": "SWAY_LR" }
+        { "token": "...", "action": "send" }
 
-    action=add  는 motion 을 이모티콘으로 바꿔 확장에 넘긴다.
-    action=send 는 그대로 넘긴다 (봉의 버튼).
+    봉이 보내는 room 필드는 무시한다. 옛 펌웨어와의 호환을 위해 받기만 한다.
     """
     cfg = request.app["cfg"]
 
@@ -260,12 +253,12 @@ async def handle_stick(request):
     except Exception:
         raise web.HTTPBadRequest(text="JSON 이 아닙니다")
 
-    room = str(body.get("room") or cfg["room"])
     token = str(body.get("token") or "")
     action = str(body.get("action") or "")
 
-    if not check_room_token(room, token, cfg):
-        LOG.warning("토큰 불일치: room=%s", short(room))
+    if not same_token(token, request.app["token"]):
+        LOG.warning("열쇠가 맞지 않는 요청을 거절했습니다 (%s)",
+                    request.remote or "출처 불명")
         raise web.HTTPUnauthorized(text="token 이 맞지 않습니다")
 
     if action == "add":
@@ -295,7 +288,7 @@ async def handle_stick(request):
         }
         # 언제 받았는지 따로 들고 있는다. 나중에 이 상태를 다시 보낼 때
         # "몇 초 전 것인지" 를 같이 알려주기 위해서다.
-        STICKS[room] = (time.monotonic(), payload)
+        STICK[0] = (time.monotonic(), payload)
 
         n = await ROOMS.broadcast(room, dict(payload, age=0))
         return web.json_response({"ok": True, "delivered": n})
@@ -303,87 +296,64 @@ async def handle_stick(request):
     else:
         raise web.HTTPBadRequest(text="action 은 add / send / clear 중 하나여야 합니다")
 
-    n = await ROOMS.broadcast(room, payload)
+    n = await ROOMS.broadcast(payload)
     # 시각이 없으면 방금 온 이벤트인지 아까 것인지 구분할 수 없다.
-    ROOMS.log.append({
-        "at": time.strftime("%H:%M:%S"), "room": short(room), **payload, "delivered": n,
-    })
-    LOG.info("봉 → %s: %s (확장 %d개)", short(room), payload, n)
+    ROOMS.log.append({"at": time.strftime("%H:%M:%S"), **payload, "delivered": n})
+    LOG.info("봉 → %s (확장 %d개)", payload, n)
 
     return web.json_response({"ok": True, "delivered": n, "payload": payload})
 
 
 async def handle_ws(request):
-    """확장이 붙는 곳. GET /ws?room=...&token=..."""
-    cfg = request.app["cfg"]
-    room = request.query.get("room") or cfg["room"]
-    token = request.query.get("token") or ""
+    """
+    확장이 붙는 곳. GET /ws
 
-    if not check_room_token(room, token, cfg):
-        raise web.HTTPUnauthorized(text="token 이 맞지 않습니다")
+    같은 컴퓨터에서 온 연결만 받는다. 서버와 확장은 언제나 같은 PC 에 있으므로
+    이것으로 충분하고, 같은 WiFi 의 다른 사람은 들어올 수 없다.
+    열쇠를 요구하지 않는 대신, 붙으면 열쇠를 알려준다 — 설정 페이지가 그걸
+    봉에 써넣는다.
+    """
+    if not is_local(request):
+        LOG.warning("바깥에서 온 확장 연결을 거절했습니다 (%s)", request.remote)
+        raise web.HTTPForbidden(text="같은 컴퓨터에서만 붙을 수 있습니다")
 
     ws = web.WebSocketResponse(heartbeat=25)   # 유휴 종료 방지용 핑
     await ws.prepare(request)
-    await ROOMS.add(room, ws, request.query.get("cid") or "")
+    await ROOMS.add(ws, request.query.get("cid") or "")
 
     try:
         await ws.send_str(json.dumps({
-            "action": "hello", "room": room,
-            # 봉의 설정 페이지가 이걸로 서버 주소 칸을 자동으로 채운다
+            "action": "hello",
+            # 설정 페이지가 이 둘로 봉을 설정한다. 팬은 아무것도 입력하지 않는다.
             "stickUrl": f"http://{lan_ip()}:{request.app['port']}",
+            "token": request.app["token"],
         }))
-        # 봉이 방금 보고했을 수도 20분 전일 수도 있다. 있으면 보여주되,
-        # 몇 초 전 것인지 반드시 같이 준다.
-        #
-        # 이걸 안 주면 확장이 "지금 막 받았다" 로 도장을 찍는다. 봉이 꺼진 지
-        # 한참인데도 확장을 새로 열 때마다 "켜져 있음" 으로 보이게 된다.
-        if room in STICKS:
-            got_at, payload = STICKS[room]
-            age = int(time.monotonic() - got_at)
-            await ws.send_str(json.dumps(dict(payload, age=age)))
+
+        # 봉이 방금 보고했을 수도, 20분 전일 수도 있다. 몇 초 전 것인지 같이 준다.
+        if STICK[0]:
+            got_at, payload = STICK[0]
+            await ws.send_str(json.dumps(
+                dict(payload, age=int(time.monotonic() - got_at))))
+
         async for msg in ws:
             if msg.type == WSMsgType.TEXT:
-                # 확장이 결과를 돌려보내면 로그에 남긴다
-                LOG.info("확장 → 서버 [%s]: %s", short(room), msg.data[:200])
-            elif msg.type == WSMsgType.ERROR:
-                LOG.warning("WebSocket 오류: %s", ws.exception())
+                LOG.info("확장 → 서버: %s", msg.data[:200])
     finally:
-        ROOMS.remove(room, ws)
+        ROOMS.remove(ws)
     return ws
 
 
 async def handle_status(request):
-    """
-    서버 상태. room 을 주면 그 방만, 안 주면 전체를 본다.
-
-    설정 페이지가 "확장이 서버에 붙었나" 를 여기서 확인한다.
-    토큰은 필요 없다 — 방 코드를 아는 쪽만 자기 방을 물어볼 수 있고,
-    돌려주는 것도 붙어 있는 개수뿐이다.
-    """
+    """서버 상태. 붙어 있는 확장 수와 최근 이벤트."""
     cfg = request.app["cfg"]
-    room = request.query.get("room")
-
-    if room:
-        return web.json_response({
-            "room": room,
-            "registered": room in _load_registry(),
-            "connected": ROOMS.count(room),
-            "motions": cfg["motions"],
-            "recent": [r for r in ROOMS.log if r.get("room") == short(room)][-10:],
-        })
-
-    # 방 목록은 스트리머 본인만 본다. 그냥 나열하면 방 코드가 공개되고,
-    # 그러면 방 코드는 더 이상 아무것도 가려주지 못한다.
-    if not check_room_token("", request.query.get("token") or "", cfg):
-        return web.json_response({
-            "rooms": None,
-            "connected_total": sum(ROOMS.count(r) for r in _load_registry()),
-            "motions": cfg["motions"],
-        })
+    stick = None
+    if STICK[0]:
+        got_at, payload = STICK[0]
+        stick = dict(payload, age=int(time.monotonic() - got_at))
 
     return web.json_response({
-        "rooms": sorted(_load_registry().keys()),
-        "connected_total": sum(ROOMS.count(r) for r in _load_registry()),
+        "connected": ROOMS.total(),
+        "stick": stick,
         "motions": cfg["motions"],
         "recent": list(ROOMS.log)[-10:],
     })
@@ -452,10 +422,10 @@ async def handle_log(request):
     토큰이 맞아야 받는다 — 아무나 디스크를 채우게 두지 않는다.
     """
     cfg = request.app["cfg"]
-    room = request.headers.get("X-Room") or cfg["room"]
-    if not check_room_token(room, request.headers.get("X-Token") or "", cfg):
-        LOG.warning("로그 토큰 불일치: room=%s", short(room))
+    if not same_token(request.headers.get("X-Token"), request.app["token"]):
+        LOG.warning("열쇠가 맞지 않는 로그를 거절했습니다")
         raise web.HTTPUnauthorized(text="bad token")
+    room = request.headers.get("X-Room") or "crown"
     body = await request.text()
     if not body.strip():
         return web.json_response({"ok": True, "lines": 0})
@@ -514,6 +484,7 @@ def build_app(cfg, port=8787):
     app = web.Application()
     app["cfg"] = cfg
     app["port"] = port
+    app["token"] = get_token(cfg)
     app.router.add_post("/api/stick", handle_stick)
     app.router.add_get("/ws", handle_ws)
     app.router.add_get("/api/status", handle_status)

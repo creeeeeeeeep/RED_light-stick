@@ -13,10 +13,16 @@
  * 연결 상태를 확인한다.
  */
 
+/*
+ * 서버는 팬 각자의 컴퓨터에서 돈다. 그래서 주소가 언제나 localhost 이고,
+ * 방(room) 개념이 없다 — 나눠 쓸 상대가 없기 때문이다.
+ *
+ * 예전에는 방 이름을 봉과 확장이 각자 들고 있어야 했는데, 한쪽 설정만
+ * 지워지면 둘 다 서버에 멀쩡히 붙은 채로 아무 일도 안 일어났다. 확장을
+ * 다시 설치하기만 해도 그 상태가 됐다.
+ */
 const DEFAULTS = {
   serverUrl: 'ws://localhost:8787/ws',
-  room: 'crown-test',
-  token: 'change-me',
   enabled: true,
 };
 
@@ -29,6 +35,7 @@ let lastDispatch = '아직 없음';
  * 봉이 살아 있는지 보려고 여기 들고 있는다.
  */
 let stickUrl = '';
+let serverToken = '';
 let lastStick = null;
 let lastStickAt = 0;
 
@@ -63,8 +70,6 @@ async function clientId() {
 
 async function wsUrl(cfg) {
   const u = new URL(cfg.serverUrl);
-  u.searchParams.set('room', cfg.room);
-  u.searchParams.set('token', cfg.token);
   u.searchParams.set('cid', await clientId());
   return u.toString();
 }
@@ -263,7 +268,9 @@ function handleServerMessage(raw) {
     dispatchToTabs({ type: 'crown-clear' });
     break;
   case 'hello':
-    log('서버 연결됨, room =', m.room);
+    log('서버 연결됨');
+    /* 봉에 써넣을 열쇠. 설정 페이지가 이걸 쓴다. */
+    if (m.token) serverToken = m.token;
     /*
      * 서버가 알려주는 "봉이 써야 할 주소". 서버는 팬의 PC 에서 도는데,
      * 봉은 다른 기기라 localhost 로는 못 온다. 공유기가 준 주소로 와야 한다.
@@ -328,7 +335,7 @@ async function connectInner() {
     return log(lastError);
   }
 
-  log('연결 시도:', cfg.serverUrl, 'room =', cfg.room);
+  log('연결 시도:', cfg.serverUrl);
 
   let sock;
   try {
@@ -385,8 +392,8 @@ async function connectInner() {
       return;
     }
 
-    if (ev.code === 1008 || ev.code === 4401) {
-      lastError = '인증 실패 — 토큰을 확인하세요';
+    if (ev.code === 1008 || ev.code === 4401 || ev.code === 1003) {
+      lastError = '서버가 연결을 거절했습니다';
     } else if (!lastError) {
       lastError = '서버에 연결할 수 없습니다';
     }
@@ -454,6 +461,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         lastError,
         lastDispatch,
         stickUrl,
+        serverToken,
         stick: lastStick,
         stickAgoSec: lastStickAt ? Math.round((Date.now() - lastStickAt) / 1000) : null,
         targetTabId: tabId,

@@ -17,8 +17,6 @@ async function refresh() {
 
     // 사용자가 입력 중이면 덮어쓰지 않는다
     if (document.activeElement !== $('serverUrl')) $('serverUrl').value = s.serverUrl || '';
-    if (document.activeElement !== $('room')) $('room').value = s.room || '';
-    if (document.activeElement !== $('token')) $('token').value = s.token || '';
 
     // 명령이 어느 탭으로 가는지 보여준다
     if (!s.targetTabId) {
@@ -65,11 +63,7 @@ async function refresh() {
 $('save').addEventListener('click', async () => {
   await chrome.runtime.sendMessage({
     type: 'crown-bg-config',
-    config: {
-      serverUrl: $('serverUrl').value.trim(),
-      room: $('room').value.trim(),
-      token: $('token').value.trim(),
-    },
+    config: { serverUrl: $('serverUrl').value.trim() },
   });
   log('저장했습니다. 다시 연결하는 중...');
   setTimeout(refresh, 600);
