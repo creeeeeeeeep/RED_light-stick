@@ -25,9 +25,13 @@ RED레드 채널 팬들에게 **무상 배포**할 목적으로 만든다 (판�
 | `server/` | 중계 서버 — **팬의 PC 에서 돈다** | Python (aiohttp) |
 | `extension/` | 크롬 확장 — 채팅에 이모티콘을 넣는다 | JS (Manifest V3) |
 | `docs/` | 설치 안내, 작업 기록, 치지직 조사 자료 | 문서 |
+| `modeling/` | 크라운 3D 모델 — STL 과 CadQuery 스크립트 | Python (CadQuery) |
 
 하드웨어는 **Waveshare ESP32-S3-Matrix** (8x8 WS2812 + QMI8658 6축 IMU) 하나로,
 LED와 IMU가 보드에 이미 붙어 있어 **전송 버튼만 납땜하면 된다** (GPIO2 + GND).
+
+크라운은 3D 프린팅한다. 현재 판은 `modeling/CROWN_v20/` 이고, `*.py` 는 형상을
+만들어낸 CadQuery 스크립트다 — 치수를 고치려면 STL 이 아니라 이쪽을 고친다.
 
 ## 어떻게 동작하나
 
