@@ -104,7 +104,7 @@ https://github.com/creeeeeeeeep/RED_light-stick
 저장소에 넣어 두면 이 주소가 된다:
 
 ```
-https://creeeeeeeeep.github.io/RED_light-stick/privacy_policy.html
+https://creeeeeeeeep.github.io/RED_light-stick/docs/privacy_policy.html
 ```
 
 (GitHub Pages 를 켜야 동작한다. Settings → Pages → Source 를 `main` 으로.)
