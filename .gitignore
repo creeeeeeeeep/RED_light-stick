@@ -48,3 +48,7 @@ server/firmware/*.bin
 
 # server/launchpad/ 는 일부러 남긴다 — GitHub Pages 로 팬에게 나눠줄 때
 # 그 폴더가 그대로 배포 대상이 된다.
+
+# 웹스토어 제출 패키지. extension/ 에서 다시 만들 수 있는 산출물이다.
+# 리스팅 문구·아이콘·프로모 이미지는 소스이므로 올린다.
+extension/확장 프로그램 출시 준비/크라운응원봉-*.zip
