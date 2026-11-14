@@ -14,6 +14,8 @@
 import io, re, base64, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import 납땜상세
 
 # 그림 원본(옛 설명서). 출력과 같은 파일을 가리키면 한 번 짓고 나서 다시 못 짓는다.
 SRC = os.path.join(HERE, "그림원본.html")
@@ -139,13 +141,41 @@ s7 = step(7, shot(STEP[7], u"받침과 보드", "tall"),
           u'<tr><td class="k">G</td><td class="ar">→</td><td class="v">GND</td></tr>'
           u'<tr><td class="k">스위치</td><td class="ar">→</td><td class="v">GPIO1 · GND</td></tr>'
           u'</table>')
+# ---- 7 뒤에 납땜 상세 한 쪽 ----
+solder = page(
+    u'<h2 class="ph">납땜 자리</h2>'
+    u'<div class="bdrow">%s%s</div>'
+    u'<table class="wire big">'
+    u'<tr><td class="k">USB-C <b>V</b></td><td class="ar">&rarr;</td>'
+    u'<td class="v"><span class="dot r"></span>5V</td><td class="pos">맨 위</td></tr>'
+    u'<tr><td class="k">USB-C <b>G</b></td><td class="ar">&rarr;</td>'
+    u'<td class="v"><span class="dot k"></span>G</td><td class="pos">위에서 2번째</td></tr>'
+    u'<tr><td class="k">스위치</td><td class="ar">&rarr;</td>'
+    u'<td class="v"><span class="dot y"></span>1</td><td class="pos">맨 아래</td></tr>'
+    u'<tr><td class="k">스위치</td><td class="ar">&rarr;</td>'
+    u'<td class="v"><span class="dot k"></span>G</td><td class="pos">위의 G 에 같이</td></tr>'
+    u'</table>'
+    u'<p class="hint">실크에 찍힌 숫자가 그대로 GPIO 번호다. 셋 다 같은 열에 있다.</p>'
+    % (납땜상세.board(True), 납땜상세.board(False)))
+
+switch = page(
+    u'<h2 class="ph">스위치 다리 고르기</h2>'
+    u'<div class="swrow">%s</div>'
+    u'<div class="checkbox">'
+    u'<p class="big2">확인</p>'
+    u'<p class="mono">BTN</p>'
+    u'<table class="wire"><tr><td class="k">안 누름</td><td class="v">1</td></tr>'
+    u'<tr><td class="k">누른 채</td><td class="v">0</td></tr></table>'
+    u'<p class="hint">바뀌지 않으면 한 짝에서 두 개를 쓴 것이다 — 다른 다리로 옮긴다.</p>'
+    u'</div>' % 납땜상세.switch_detail())
+
 s8 = step(8, shot(STEP[8], u"왕관", "tall"), u'<div class="icons">%s<b>본드</b></div>' % GLUE)
 s9 = step(9, shot(STEP[9], u"돔", "tall"),
           u'<div class="icons">%s<b>30°</b>%s<b>본드</b></div>' % (TURN, GLUE))
 s10 = step(10, shot(STEP[10], u"십자", "tall"), u'<div class="icons">%s<b>본드</b></div>' % GLUE)
 
-pages = [page(s1, "p-1"), page(s2 + s3, "p-2"), page(s4 + s5, "p-2"),
-         page(s6 + s7, "p-2"), page(s8 + s9, "p-2"), page(s10, "p-1")]
+pages = [page(s1, "p-1"), switch, page(s2 + s3, "p-2"), page(s4 + s5, "p-2"),
+         page(s6 + s7, "p-2"), solder, page(s8 + s9, "p-2"), page(s10, "p-1")]
 
 # ---------------------------------------------------------------- 확인
 checks = [u"케이블이 끝까지 꽂힌다", u"꽂으면 불이 켜진다", u"버튼이 딸깍 되돌아온다",
@@ -233,6 +263,24 @@ table.wire .k{background:#f3f3f1;font-weight:800}
 table.wire .v{font-weight:800;font-family:Consolas,monospace}
 table.wire .len{background:var(--y);font-weight:800}
 table.wire .ar{border:0;padding:0 3mm;font-size:17px}
+
+/* 납땜 상세 */
+.bdrow{display:flex;gap:6mm;justify-content:center;align-items:flex-start}
+.bd{width:76mm;height:auto}
+.sw{width:92mm;height:auto}
+.swrow{display:flex;justify-content:center}
+table.wire.big td{padding:2.5mm 5mm;font-size:15px}
+table.wire .pos{background:#f8f8f6;color:#666;font-weight:500;font-size:12px}
+.dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;
+  border:1.5px solid #111;vertical-align:-1px}
+.dot.r{background:#E34B4B}.dot.k{background:#2B2B2B}.dot.y{background:#F2C230}
+.hint{font-size:12px;color:#777;margin:3mm 0 0;text-align:center}
+.checkbox{border:2.5px solid #111;border-radius:4px;padding:5mm;display:flex;
+  flex-direction:column;align-items:center;gap:2mm;max-width:92mm;margin:0 auto}
+.big2{font-size:17px;font-weight:800;margin:0}
+.mono{font-family:Consolas,monospace;font-size:19px;font-weight:800;margin:0;
+  background:var(--y);padding:1mm 5mm;border-radius:3px}
+table.wire{margin:0 auto}
 
 /* 확인 */
 .done-page{justify-content:center}
