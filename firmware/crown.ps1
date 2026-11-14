@@ -105,6 +105,7 @@ function Show-Help {
     Write-Host "    burn  [-Dev] [COM3]      굽기 (시리얼 모니터 안 엶)"
     Write-Host "    flash [-Dev] [-Erase]    굽고 시리얼 모니터까지"
     Write-Host "    monitor [-Dev]           굽지 않고 시리얼 로그만 본다"
+    Write-Host "    apply                    모니터 페이지가 찾은 감도 값을 소스에 넣는다"
     Write-Host "    release [-Force]         배포 빌드를 서버에 올린다 (-Force: 되돌리기)"
     Write-Host "    launchpad [https://주소]  브라우저로 굽는 ESP Launchpad 파일 생성"
     Write-Host "    version [0.5.1]          버전 보기 / 올리기"
@@ -331,6 +332,119 @@ console_baudrate = 115200
         Write-Host ""
         Write-Host "주소는 반드시 https 여야 합니다. Launchpad 가 https 라 평문은 브라우저가 막습니다." -ForegroundColor DarkGray
         Write-Host "굽는 순간 봉의 WiFi 설정이 지워집니다 (NVS 가 함께 덮이기 때문)." -ForegroundColor DarkGray
+    }
+
+    'apply' {
+        <#
+          모니터 페이지가 찾아낸 값을 소스에 넣는다.
+
+          페이지에서 "소스에 반영" 을 누르면 서버가 tuning.json 에 적는다.
+          여기서 그걸 읽어 gesture.c 의 gesture_default_config() 와
+          board_config.h 의 #define 을 고친다.
+
+          손으로 두 파일을 고치면 거기서 실수가 난다. 한쪽만 고치거나,
+          f 를 빼먹거나, 비슷한 이름을 잘못 짚는다.
+
+          고치기 전에 무엇이 어떻게 바뀌는지 보여주고 한 번 묻는다.
+        #>
+        $json = Join-Path $SERVER_DIR 'tuning.json'
+        if (-not (Test-Path $json)) {
+            Write-Host "tuning.json 이 없습니다." -ForegroundColor Red
+            Write-Host "  모니터 페이지에서 '값 찾기' → '소스에 반영' 을 먼저 하세요." -ForegroundColor DarkGray
+            Write-Host "  http://localhost:8787/monitor" -ForegroundColor DarkGray
+            return
+        }
+
+        $data = Get-Content $json -Raw -Encoding UTF8 | ConvertFrom-Json
+        $vals = $data.values
+
+        # 손잡이 이름 -> 어느 파일의 무엇인가
+        $inC = @{
+            idle_rms = 'idle_rms_g'; idle_exit = 'idle_exit_ratio'; axis_ratio = 'axis_ratio'
+            vig_peak = 'vig_peak_g'; vig_rms = 'vig_rms_g'; vig_gyro = 'vig_gyro_dps'
+            vig_gyro_min = 'vig_gyro_min_rms'; vig_hyst = 'vig_hysteresis'
+            stroke_dead = 'stroke_dead_g'; stroke_flip = 'stroke_flip_dot'
+            max_crest = 'max_crest'; min_strokes = 'min_strokes'
+            confirm_ticks = 'confirm_ticks'; hold_ms = 'hold_ms'
+        }
+        $inH = @{
+            add_ms = 'QUEUE_ADD_INTERVAL_MS'; arm_ms = 'QUEUE_ARM_MS'; gap_ms = 'QUEUE_GAP_MS'
+            queue_max = 'QUEUE_MAX'; btn_gpio = 'BUTTON_GPIO'
+            btn_debounce = 'BUTTON_DEBOUNCE_MS'; btn_low = 'BUTTON_ACTIVE_LOW'
+        }
+        # 정수로 적어야 하는 것들 (나머지는 1.234f 꼴)
+        $ints = @('min_strokes','confirm_ticks','hold_ms','add_ms','arm_ms','gap_ms',
+                  'queue_max','btn_gpio','btn_debounce','btn_low')
+
+        $gc = 'main\gesture.c'
+        $bc = 'main\board_config.h'
+        $gcText = Get-Content $gc -Raw -Encoding UTF8
+        $bcText = Get-Content $bc -Raw -Encoding UTF8
+        $plan = @()
+
+        foreach ($p in $vals.PSObject.Properties) {
+            $key = $p.Name
+            $num = [double]$p.Value
+            $isInt = $ints -contains $key
+            $txt = if ($isInt) { [string][int][math]::Round($num) } else { ('{0:0.###}f' -f $num) }
+
+            if ($inC.ContainsKey($key)) {
+                $field = $inC[$key]
+                $pat = "(cfg->$field\s*=\s*)([^;]+)(;)"
+                $m = [regex]::Match($gcText, $pat)
+                if (-not $m.Success) { Write-Host "gesture.c 에서 $field 를 찾지 못했습니다." -ForegroundColor Yellow; continue }
+                $plan += [pscustomobject]@{ File='gesture.c'; Name=$field; Old=$m.Groups[2].Value.Trim(); New=$txt; Pat=$pat; Which='c' }
+            }
+            elseif ($inH.ContainsKey($key)) {
+                $name = $inH[$key]
+                $pat = "(#define\s+$name\s+)(\S+)"
+                $m = [regex]::Match($bcText, $pat)
+                if (-not $m.Success) { Write-Host "board_config.h 에서 $name 을 찾지 못했습니다." -ForegroundColor Yellow; continue }
+                $plan += [pscustomobject]@{ File='board_config.h'; Name=$name; Old=$m.Groups[2].Value.Trim(); New=$txt; Pat=$pat; Which='h' }
+            }
+            else {
+                Write-Host "모르는 키라 건너뜁니다: $key" -ForegroundColor Yellow
+            }
+        }
+
+        $plan = @($plan | Where-Object { $_.Old -ne $_.New })
+        if ($plan.Count -eq 0) {
+            Write-Host "소스가 이미 그 값입니다. 바꿀 것이 없습니다." -ForegroundColor Green
+            return
+        }
+
+        Write-Host ""
+        Write-Host "  찾은 시각: $($data.at)" -ForegroundColor DarkGray
+        Write-Host ""
+        foreach ($c in $plan) {
+            Write-Host ("  {0,-18} {1,-22} {2,10}  ->  {3}" -f $c.File, $c.Name, $c.Old, $c.New)
+        }
+        Write-Host ""
+        $yn = Read-Host "  이대로 소스를 고칠까요? (y/N)"
+        if ($yn -ne 'y' -and $yn -ne 'Y') { Write-Host "  그만둡니다." -ForegroundColor DarkGray; return }
+
+        foreach ($c in $plan) {
+            if ($c.Which -eq 'c') {
+                $gcText = [regex]::Replace($gcText, $c.Pat, ('${1}' + $c.New + '${3}'), 1)
+            } else {
+                $bcText = [regex]::Replace($bcText, $c.Pat, ('${1}' + $c.New), 1)
+            }
+        }
+        # 두 파일 모두 UTF-8 BOM 없이. BOM 을 붙이면 컴파일러가 BOM 을 토큰으로 본다.
+        $utf8 = New-Object System.Text.UTF8Encoding $false
+        if ($plan | Where-Object { $_.Which -eq 'c' }) {
+            [System.IO.File]::WriteAllText((Join-Path $PSScriptRoot $gc), $gcText, $utf8)
+        }
+        if ($plan | Where-Object { $_.Which -eq 'h' }) {
+            [System.IO.File]::WriteAllText((Join-Path $PSScriptRoot $bc), $bcText, $utf8)
+        }
+
+        Write-Host ""
+        Write-Host "  고쳤습니다. 이제 다시 구우면 됩니다." -ForegroundColor Green
+        Write-Host "    crown build        배포용" -ForegroundColor DarkGray
+        Write-Host "    crown flash -Dev   개발자 빌드로 굽고 확인" -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "  저장소 사본에도 반영하려면 firmware\main\ 으로 복사하세요." -ForegroundColor DarkGray
     }
 
     'version' {

@@ -55,6 +55,23 @@
   .knob input[type=range] { width:100%; margin:7px 0 2px; }
   .knob .kw { color:var(--dim); font-size:11px; }
   .knob.changed { outline:1px solid #2b6cb0; }
+  .caldeck { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px; }
+  .cal { background:#11141a; border-radius:6px; padding:12px; text-align:center;
+         border:1px solid transparent; }
+  .cal.done { border-color:#3a7d44; }
+  .cal.rec  { border-color:#c25a5a; animation:pulse .9s infinite; }
+  @keyframes pulse { 50% { background:#1d1416; } }
+  .cal h4 { margin:0 0 3px; font-size:13px; }
+  .cal .cd { color:var(--dim); font-size:11px; min-height:28px; }
+  .cal button { width:100%; margin-top:8px; }
+  .cal .cn { font-size:19px; font-weight:bold; margin:4px 0 0; }
+  .scores { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
+            gap:8px; margin:12px 0 0; }
+  .score { background:#11141a; border-radius:6px; padding:9px; text-align:center; }
+  .score b { display:block; font-size:19px; }
+  .score.bad b { color:#e06c6c; }
+  .score.ok  b { color:#5fbf72; }
+  .score span { color:var(--dim); font-size:11px; }
   #codeOut { background:#11141a; border-radius:6px; padding:12px; margin:12px 0 0;
              overflow-x:auto; font:12px/1.6 Consolas, monospace; white-space:pre; }
   .stat .v { font-size:17px; font-weight:bold; }
@@ -137,6 +154,27 @@
     </div>
     <div id="log"></div>
   </div>
+</div>
+
+<div class="panel" style="margin-top:14px">
+  <div class="bar" style="margin-bottom:4px">
+    <b style="font-size:14px">자동 맞추기</b>
+    <span class="dimtext">네 번 흔들어 주시면 값은 제가 찾습니다.</span>
+  </div>
+  <p class="dimtext" style="margin:0 0 12px">
+    봉을 <b>크라운까지 끼운 상태</b>로 들고 하세요. 맨보드로 맞춘 값은 크라운을 달면 안 맞습니다.
+  </p>
+
+  <div class="caldeck" id="caldeck"></div>
+
+  <div class="bar" style="margin-top:12px">
+    <button id="calRun" class="primary" disabled>값 찾기</button>
+    <button id="calApply" disabled>봉에 적용</button>
+    <button id="calSave" disabled>소스에 반영</button>
+    <button id="calDrop" disabled>녹음 지우기</button>
+    <span id="calMsg" class="dimtext"></span>
+  </div>
+  <div id="calResult" hidden></div>
 </div>
 
 <div class="panel" style="margin-top:14px">
@@ -554,6 +592,7 @@ function handleLine(line) {
   if (d.q >= 0) $('qCount').textContent = d.q;
 
   rxCount++;
+  calFeed(d);
   hist.push(d);
   if (hist.length > HIST_MAX) hist.shift();
   render(d);
@@ -685,6 +724,7 @@ function setToolsEnabled(on) {
   var ids = ['btnCheck', 'btnScan', 'tLoad', 'tReset', 'tCode'];
   for (var i = 0; i < ids.length; i++) $(ids[i]).disabled = !on;
   if (!on) showButton(false);
+  refreshCalButtons();
 }
 
 $('btnCheck').onclick = function () {
@@ -702,6 +742,318 @@ $('tReset').onclick = function () {
   send('TUNE reset');
 };
 $('tCode').onclick = showCode;
+
+/* =================================================================
+ * 자동 맞추기
+ *
+ * 손잡이가 21개나 되어서 감으로 맞추기는 무리다. 네 가지 동작을 녹음해
+ * 두고, 그 데이터를 가장 잘 가르는 값을 찾아서 넣는다.
+ *
+ * 판정은 펌웨어의 classify() 를 그대로 옮겼다. CSV 한 줄이 50ms 이고
+ * 펌웨어도 50ms 마다 분류하므로(DECIDE_HZ 20), 한 줄이 판정 한 번에
+ * 정확히 대응한다. confirm_ticks / hold_ms / 히스테리시스까지 같이 돈다.
+ * ================================================================= */
+
+var CAL_SPEC = [
+  { key: 'IDLE',     name: '가만히',   sec: 5, tip: '봉을 들고 가만히 계세요' },
+  { key: 'SWAY_LR',  name: '좌우로',   sec: 7, tip: '좌우로 흔드세요' },
+  { key: 'PUMP_UD',  name: '위아래로', sec: 7, tip: '위아래로 찍으세요' },
+  { key: 'VIGOROUS', name: '격하게',   sec: 7, tip: '힘껏 흔드세요' }
+];
+
+var takes = {};          // key -> 샘플 배열
+var recording = null;    // { key, until, buf }
+var calBest = null;      // 찾아낸 값
+
+function buildCalDeck() {
+  var host = $('caldeck');
+  host.innerHTML = '';
+  CAL_SPEC.forEach(function (sp) {
+    var el = document.createElement('div');
+    el.className = 'cal';
+    el.id = 'cal_' + sp.key;
+    el.innerHTML = '<h4></h4><div class="cd"></div><div class="cn">—</div>'
+                 + '<button disabled></button>';
+    el.querySelector('h4').textContent = sp.name;
+    el.querySelector('.cd').textContent = sp.tip;
+    var b = el.querySelector('button');
+    b.textContent = sp.sec + '초 녹음';
+    b.onclick = function () { startTake(sp); };
+    host.appendChild(el);
+  });
+  refreshCalButtons();
+}
+
+function startTake(sp) {
+  if (recording) return;
+  recording = { key: sp.key, buf: [], until: performance.now() + sp.sec * 1000 };
+  var el = $('cal_' + sp.key);
+  el.classList.add('rec');
+  el.classList.remove('done');
+
+  var tick = setInterval(function () {
+    var left = Math.max(0, recording.until - performance.now());
+    el.querySelector('.cn').textContent = (left / 1000).toFixed(1) + '초';
+    if (left > 0) return;
+
+    clearInterval(tick);
+    el.classList.remove('rec');
+    takes[sp.key] = recording.buf;
+    recording = null;
+
+    el.classList.add('done');
+    el.querySelector('.cn').textContent = takes[sp.key].length + '개';
+    el.querySelector('.cd').textContent = '녹음됨 — 다시 누르면 덮어씁니다';
+    refreshCalButtons();
+  }, 100);
+
+  calMsg(sp.name + ' — 지금 하세요');
+}
+
+/* handleLine 이 TUNE 줄마다 불러준다 */
+function calFeed(d) {
+  if (recording) recording.buf.push(d);
+}
+
+function calMsg(t) { $('calMsg').textContent = t || ''; }
+
+function refreshCalButtons() {
+  var have = CAL_SPEC.filter(function (sp) { return takes[sp.key]; }).length;
+  var connected = $('connect').disabled;   // 연결되면 '연결' 버튼이 꺼진다
+  CAL_SPEC.forEach(function (sp) {
+    var b = $('cal_' + sp.key).querySelector('button');
+    b.disabled = !connected || !!recording;
+  });
+  $('calRun').disabled  = have < CAL_SPEC.length || !!recording;
+  $('calDrop').disabled = have === 0;
+  if (have < CAL_SPEC.length) { $('calApply').disabled = true; $('calSave').disabled = true; }
+}
+
+/* ------------------------------------------------- 펌웨어 판정 재현 */
+
+function classifyOne(d, cfg, committed) {
+  var idleTh = (committed === 'IDLE') ? cfg.idle_rms : cfg.idle_rms * cfg.idle_exit;
+
+  if (d.strokes < cfg.min_strokes || d.total < idleTh) return 'IDLE';
+  if (d.peak > cfg.max_crest * d.total) return 'IDLE';
+
+  var s = (committed === 'VIGOROUS') ? cfg.vig_hyst : 1.0;
+  if (d.peak >= cfg.vig_peak * s ||
+      d.total >= cfg.vig_rms * s ||
+      (d.gyro >= cfg.vig_gyro * s && d.total >= cfg.vig_gyro_min * s)) return 'VIGOROUS';
+
+  /* 수평은 두 축의 합이라 √2 로 나눠 축 기준을 맞춘다 (gesture.c 와 동일) */
+  var hAxis = d.h * 0.70710678;
+  if (d.v >= hAxis * cfg.axis_ratio) return 'PUMP_UD';
+  if (hAxis >= d.v * cfg.axis_ratio) return 'SWAY_LR';
+  return committed;
+}
+
+/*
+ * 끈적임 없는 단발 판정 비율.
+ *
+ * 아래 replayTake() 는 펌웨어 그대로라 한 번 맞게 확정되면 계속 유지된다.
+ * 사용자가 겪는 동작은 그쪽이 맞지만, 점수로 쓰면 "처음만 맞으면 100%" 가
+ * 되어 어느 방향으로 고쳐야 할지가 안 보인다. 그래서 매 샘플을 IDLE 기준으로
+ * 새로 판정한 비율을 같이 본다 — 이쪽은 값이 조금만 움직여도 같이 움직인다.
+ */
+function singleShotTake(samples, cfg, want) {
+  var hit = 0, n = 0;
+  for (var i = 20; i < samples.length; i++) {
+    n++;
+    if (classifyOne(samples[i], cfg, 'IDLE') === want) hit++;
+  }
+  return n ? hit / n : 0;
+}
+
+/* 한 녹음을 통째로 돌려 확정 상태가 목표와 같았던 비율을 돌려준다 */
+function replayTake(samples, cfg, want) {
+  var committed = 'IDLE', candidate = 'IDLE', ticks = 0, committedAt = -1e9;
+  var hit = 0, n = 0;
+
+  for (var i = 0; i < samples.length; i++) {
+    var d = samples[i];
+    var cand = classifyOne(d, cfg, committed);
+
+    if (cand === candidate) ticks++; else { candidate = cand; ticks = 1; }
+
+    if (cand !== committed) {
+      var need = (cand === 'VIGOROUS') ? 1 : cfg.confirm_ticks;
+      if (ticks >= need && (d.t - committedAt) >= cfg.hold_ms) {
+        committed = cand;
+        committedAt = d.t;
+      }
+    }
+    /* 앞 1초는 윈도가 차는 중이라 빼고 센다 */
+    if (i < 20) continue;
+    n++;
+    if (committed === want) hit++;
+  }
+  return n ? hit / n : 0;
+}
+
+/* ------------------------------------------------- 값 찾기 */
+
+function baseCfg() {
+  var c = {};
+  for (var k in knobs) c[k] = knobs[k].value;
+  return c;
+}
+
+function evaluate(cfg) {
+  var per = {}, sumReplay = 0, sumShot = 0;
+  CAL_SPEC.forEach(function (sp) {
+    var r = replayTake(takes[sp.key], cfg, sp.key);
+    per[sp.key] = r;
+    sumReplay += r;
+    sumShot += singleShotTake(takes[sp.key], cfg, sp.key);
+  });
+  var n = CAL_SPEC.length;
+  /*
+   * 네 동작을 똑같이 친다 — IDLE 샘플이 많다고 그쪽에 끌려가면 안 된다.
+   * 실제 동작(replay)을 주로 보되, 단발 판정을 섞어 평평한 구간에서도
+   * 어느 쪽이 나은지 가릴 수 있게 한다.
+   */
+  return {
+    score: 0.75 * (sumReplay / n) + 0.25 * (sumShot / n),
+    per: per
+  };
+}
+
+/*
+ * 좌표 하강.
+ *
+ * 다섯 개만 움직인다. 나머지는 실기 로그로 이미 잡아 둔 값이라
+ * 건드릴수록 나빠지기 쉽고, 움직이는 축이 늘면 과적합도 빨라진다.
+ */
+var CAL_AXES = [
+  { key: 'idle_rms',   lo: 0.04, hi: 0.60, step: 0.01 },
+  { key: 'axis_ratio', lo: 1.02, hi: 2.20, step: 0.01 },
+  { key: 'vig_rms',    lo: 0.70, hi: 4.00, step: 0.02 },
+  { key: 'vig_peak',   lo: 1.50, hi: 9.00, step: 0.05 },
+  { key: 'min_strokes', lo: 1,   hi: 5,    step: 1    }
+];
+
+function runCalibration() {
+  if (!knobs.axis_ratio) {
+    calMsg('봉에서 값을 아직 못 받았습니다 — "봉에서 불러오기" 를 먼저 누르세요.');
+    return;
+  }
+  calMsg('찾는 중…');
+  var cfg = baseCfg();
+  var best = evaluate(cfg);
+
+  for (var pass = 0; pass < 4; pass++) {
+    var improved = false;
+
+    for (var a = 0; a < CAL_AXES.length; a++) {
+      var ax = CAL_AXES[a];
+      var bestV = cfg[ax.key], bestS = best.score;
+
+      for (var v = ax.lo; v <= ax.hi + 1e-9; v += ax.step) {
+        var keep = cfg[ax.key];
+        cfg[ax.key] = v;
+        var r = evaluate(cfg);
+        /* 같은 점수면 기본값에 가까운 쪽을 남긴다 — 괜히 멀리 가지 않는다 */
+        if (r.score > bestS + 1e-6 ||
+            (Math.abs(r.score - bestS) < 1e-6 &&
+             Math.abs(v - knobs[ax.key].base) < Math.abs(bestV - knobs[ax.key].base))) {
+          bestS = r.score; bestV = v; improved = true;
+        }
+        cfg[ax.key] = keep;
+      }
+      cfg[ax.key] = bestV;
+      best = evaluate(cfg);
+    }
+    if (!improved) break;
+  }
+
+  calBest = cfg;
+  showCalResult(cfg, best);
+  $('calApply').disabled = false;
+  $('calSave').disabled = false;
+  calMsg('');
+}
+
+function showCalResult(cfg, res) {
+  var box = $('calResult');
+  var parts = ['<div class="scores">'];
+  CAL_SPEC.forEach(function (sp) {
+    var pct = Math.round(res.per[sp.key] * 100);
+    parts.push('<div class="score ' + (pct >= 80 ? 'ok' : 'bad') + '">'
+             + '<b>' + pct + '%</b><span>' + sp.name + '</span></div>');
+  });
+  parts.push('</div>');
+
+  var rows = [];
+  CAL_AXES.forEach(function (ax) {
+    var k = knobs[ax.key];
+    var was = k.base, now = cfg[ax.key];
+    if (Math.abs(was - now) < 1e-9) return;
+    var f = (ax.step >= 1) ? 0 : (ax.step < 0.02 ? 3 : 2);
+    rows.push(ax.key + ': ' + was.toFixed(f) + '  →  ' + now.toFixed(f));
+  });
+  parts.push('<pre style="margin:12px 0 0">'
+           + (rows.length ? rows.join(NL) : '기본값이 이미 제일 낫습니다.')
+           + '</pre>');
+
+  var weak = CAL_SPEC.filter(function (sp) { return res.per[sp.key] < 0.8; });
+  if (weak.length) {
+    parts.push('<p class="dimtext" style="margin:10px 0 0">'
+      + weak.map(function (w) { return w.name; }).join(', ')
+      + ' 가 잘 안 잡힙니다. 그 동작을 더 분명하게 해서 다시 녹음하면 나아집니다.</p>');
+  }
+  box.innerHTML = parts.join('');
+  box.hidden = false;
+}
+
+/* ------------------------------------------------- 적용 */
+
+async function applyCalibration() {
+  if (!calBest) return;
+  for (var a = 0; a < CAL_AXES.length; a++) {
+    var key = CAL_AXES[a].key;
+    setKnob(key, calBest[key], false);
+    await send('TUNE ' + key + ' ' + knobs[key].input.value);
+  }
+  calMsg('봉에 넣었습니다. 흔들어서 확인해 보세요.');
+}
+
+/*
+ * 소스에 반영.
+ *
+ * 값을 찾아도 손으로 두 파일을 고쳐야 하면 거기서 실수가 난다.
+ * 서버에 적어 두고 crown.bat apply 가 소스를 고치게 한다.
+ */
+async function saveCalibration() {
+  if (!calBest) return;
+  var out = {};
+  CAL_AXES.forEach(function (ax) { out[ax.key] = calBest[ax.key]; });
+
+  try {
+    var r = await fetch('/api/tuning', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: out, at: new Date().toISOString() })
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    calMsg('server/tuning.json 에 적었습니다 → crown.bat apply');
+  } catch (e) {
+    calMsg('서버에 못 적었습니다 (' + e.message + '). 아래 "소스에 넣을 값 보기" 를 쓰세요.');
+  }
+}
+
+$('calRun').onclick   = runCalibration;
+$('calApply').onclick = applyCalibration;
+$('calSave').onclick  = saveCalibration;
+$('calDrop').onclick  = function () {
+  takes = {}; calBest = null;
+  $('calResult').hidden = true;
+  buildCalDeck();
+  calMsg('지웠습니다.');
+};
+
+buildCalDeck();
 
 $('connect').onclick = connect;
 $('disconnect').onclick = disconnect;

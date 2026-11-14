@@ -420,6 +420,52 @@ async def handle_firmware(request):
 LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
 
 
+TUNING_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tuning.json")
+
+
+async def handle_tuning(request):
+    """
+    모니터 페이지가 찾아낸 감도 값을 받아 둔다.
+
+    값을 찾아도 소스를 손으로 고쳐야 하면 거기서 실수가 난다. 여기 적어 두면
+    crown.bat apply 가 gesture.c 와 board_config.h 를 대신 고친다.
+
+    같은 컴퓨터에서만 받는다. 페이지가 이 서버에서 열리므로 그걸로 충분하고,
+    디스크에 쓰는 일이라 바깥에 열어 둘 이유가 없다.
+    """
+    if not is_local(request):
+        LOG.warning("바깥에서 온 튜닝 저장을 거절했습니다 (%s)", request.remote)
+        raise web.HTTPForbidden(text="같은 컴퓨터에서만 됩니다")
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise web.HTTPBadRequest(text="JSON 이 아닙니다")
+
+    values = body.get("values")
+    if not isinstance(values, dict) or not values:
+        raise web.HTTPBadRequest(text="values 가 비어 있습니다")
+
+    clean = {}
+    for k, v in values.items():
+        if not isinstance(k, str) or not k.replace("_", "").isalnum():
+            raise web.HTTPBadRequest(text=f"이상한 키: {k}")
+        try:
+            clean[k] = float(v)
+        except (TypeError, ValueError):
+            raise web.HTTPBadRequest(text=f"숫자가 아닙니다: {k}")
+
+    data = {"at": body.get("at") or time.strftime("%Y-%m-%dT%H:%M:%S"), "values": clean}
+    tmp = TUNING_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, TUNING_PATH)
+
+    LOG.info("튜닝 값을 tuning.json 에 적었습니다: %s",
+             ", ".join(f"{k}={v:g}" for k, v in clean.items()))
+    return web.json_response({"ok": True, "path": TUNING_PATH})
+
+
 async def handle_log(request):
     """
     개발자 빌드가 흔든 기록을 흘려보내는 곳. 한 줄에 TUNE,... 하나.
@@ -495,6 +541,7 @@ def build_app(cfg, port=8787):
     app.router.add_get("/api/status", handle_status)
     app.router.add_get("/api/firmware", handle_firmware)
     app.router.add_post("/api/log", handle_log)
+    app.router.add_post("/api/tuning", handle_tuning)
     os.makedirs(FIRMWARE_DIR, exist_ok=True)
     app.router.add_static("/firmware/", FIRMWARE_DIR)
     os.makedirs(LAUNCHPAD_DIR, exist_ok=True)

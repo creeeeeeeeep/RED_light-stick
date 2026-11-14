@@ -63,3 +63,8 @@ extension/확장 프로그램 출시 준비/크라운응원봉-*.zip
 # 제출용 zip 을 풀어본 폴더. extension/ 과 같은 파일이라 두 벌이 된다.
 # (git add -A 로 딸려 들어간 적이 있다)
 extension/확장 프로그램 출시 준비/크라운응원봉-*/
+
+# 모니터 페이지가 찾은 감도 값. crown apply 가 읽어 소스를 고치고 나면
+# 소스가 진짜 기준이 된다. 이 파일은 그 사이를 잇는 쪽지라 올리지 않는다.
+server/tuning.json
+server/tuning.json.tmp
