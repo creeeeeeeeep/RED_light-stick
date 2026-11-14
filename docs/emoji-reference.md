@@ -143,7 +143,7 @@ content
 
 ## 5. 채팅 WebSocket 전송 프레임 (실측)
 
-`ws-capture.js` 로 잡은 실제 이모티콘 전송 프레임. 민감값은 가림.
+`조사/ws-capture.js` 로 잡은 실제 이모티콘 전송 프레임. 민감값은 가림.
 
 ```json
 {

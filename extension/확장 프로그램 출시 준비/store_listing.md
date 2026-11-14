@@ -133,10 +133,10 @@ https://creeeeeeeeep.github.io/RED_light-stick/docs/privacy_policy.html
 
 ## 6. 올리기 전 점검
 
-- [ ] `크라운응원봉-0.8.0.zip` 로 패키징 (`legacy-websocket-inject.js`, `README.md` 제외)
-- [ ] 개인정보처리방침을 공개 주소에 올리고 URL 확보
+- [ ] `크라운응원봉-<버전>.zip` 로 패키징 (`legacy-websocket-inject.js`, `README.md` 제외)
+- [x] 개인정보처리방침을 공개 주소에 올리고 URL 확보 — GitHub Pages
 - [ ] 스크린샷 1280×800 으로 1장 이상
-- [ ] 개발자 등록비 **$5** 결제 (최초 1회)
+- [x] 개발자 등록비 **$5** 결제 (최초 1회) — 완료
 - [ ] 공개 범위를 **일부 공개(Unlisted)** 로
 
 ---
