@@ -85,6 +85,16 @@ gesture_t gesture_update(gesture_engine_t *eng, const qmi8658_data_t *s,
 
 gesture_t gesture_current(const gesture_engine_t *eng);
 
+/*
+ * 실행 중에 임계값을 읽고 바꾼다. 튜닝 페이지가 쓰는 통로다.
+ *
+ * NVS 에 저장하지 않는다 — 재부팅하면 빌드에 박힌 기본값으로 돌아간다.
+ * 좋은 값을 찾으면 gesture_default_config() 에 적어 넣고 다시 굽는 것이
+ * 맞다. 팬에게 나가는 봉이 각자 다른 값을 들고 있으면 안 된다.
+ */
+void gesture_get_config(const gesture_engine_t *eng, gesture_config_t *out);
+void gesture_set_config(gesture_engine_t *eng, const gesture_config_t *cfg);
+
 /* 0.0~1.0으로 정규화된 움직임 세기 (LED 이펙트 강도 변조용) */
 float gesture_intensity(const gesture_engine_t *eng);
 

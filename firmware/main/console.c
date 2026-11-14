@@ -13,6 +13,7 @@
 #include "ota.h"
 #include "devlog.h"
 #include "power.h"
+#include "tuning.h"
 #include "esp_log.h"
 
 static const char *TAG = "console";
@@ -162,11 +163,72 @@ static void handle_line(char *line)
         /*
          * 납땜한 버튼이 실제로 그 패드에 붙었는지 확인하는 용도.
          * 누르지 않으면 1, 누른 채로 실행하면 0 이어야 한다.
+         *
+         * "BTN scan" 은 쓸 수 있는 핀을 전부 훑는다. 어느 패드에 납땜했는지
+         * 모를 때 누른 채로 실행하면 0 인 핀이 그 핀이다.
          */
-        printf("ST btn_soldered_gpio%d=%d\n", BUTTON_GPIO, gpio_get_level(BUTTON_GPIO));
+        char *bv = next_token(&p);
+        if (bv && (!strcmp(bv, "scan") || !strcmp(bv, "SCAN"))) {
+            /* 매트릭스와 IMU 가 쓰는 핀은 건드리지 않는다 */
+            static const int SKIP[] = { LED_GPIO, IMU_SDA_GPIO, IMU_SCL_GPIO, 19, 20 };
+            for (int g = 0; g <= 21; g++) {
+                bool skip = false;
+                for (size_t k = 0; k < sizeof(SKIP) / sizeof(SKIP[0]); k++) {
+                    if (SKIP[k] == g) skip = true;
+                }
+                if (skip) continue;
+
+                gpio_config_t gc = {
+                    .pin_bit_mask = (1ULL << g),
+                    .mode         = GPIO_MODE_INPUT,
+                    .pull_up_en   = GPIO_PULLUP_ENABLE,
+                    .pull_down_en = GPIO_PULLDOWN_DISABLE,
+                    .intr_type    = GPIO_INTR_DISABLE,
+                };
+                if (gpio_config(&gc) != ESP_OK) continue;
+                printf("ST btn_scan_gpio%d=%d\n", g, gpio_get_level(g));
+            }
+            fflush(stdout);
+            reply_ok("BTN", "누른 채로 했다면 0 인 핀이 버튼입니다");
+            return;
+        }
+
+        const int bg = tuning_button_gpio();
+        printf("ST btn_soldered_gpio%d=%d\n", bg, gpio_get_level(bg));
         printf("ST btn_onboard_gpio%d=%d\n",  BUTTON_ONBOARD_GPIO, gpio_get_level(BUTTON_ONBOARD_GPIO));
         fflush(stdout);
         reply_ok("BTN", "누른 채로 다시 실행하면 0 이어야 합니다");
+
+    } else if (!strcmp(cmd, "TUNE")) {
+        /*
+         * 모션 감도와 버튼 설정을 실행 중에 바꾼다.
+         *
+         *   TUNE                 지금 값을 전부 찍는다 (튜닝 페이지가 읽는다)
+         *   TUNE axis_ratio 1.5  값 하나를 바꾼다
+         *   TUNE reset           빌드에 박힌 기본값으로
+         *
+         * 저장하지 않는다. 재부팅하면 돌아간다 — 좋은 값을 찾으면
+         * gesture.c / board_config.h 에 적어 넣고 다시 굽는 것이 맞다.
+         */
+        char *key = next_token(&p);
+        if (!key || !*key) { tuning_print_all(); reply_ok("TUNE", ""); return; }
+
+        if (!strcmp(key, "reset") || !strcmp(key, "RESET")) {
+            tuning_reset();
+            tuning_print_all();
+            reply_ok("TUNE", "기본값으로 되돌렸습니다");
+            return;
+        }
+
+        char *val = next_token(&p);
+        if (!val || !*val) { reply_err("TUNE <키> <값>"); return; }
+
+        char terr[96] = {0};
+        if (tuning_set(key, (float)atof(val), terr, sizeof(terr))) {
+            reply_ok("TUNE", key);
+        } else {
+            reply_err(terr);
+        }
 
     } else if (!strcmp(cmd, "LED")) {
         /*

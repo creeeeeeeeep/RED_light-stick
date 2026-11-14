@@ -37,6 +37,26 @@
          white-space:pre-wrap; word-break:break-all; }
   .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:12px; }
   .stat { background:#11141a; border-radius:6px; padding:8px; text-align:center; }
+  .btnrow { display:flex; align-items:center; gap:12px; margin-top:14px;
+            background:#11141a; border-radius:6px; padding:10px 12px; }
+  .led { width:26px; height:26px; border-radius:50%; background:#2a2f38;
+         border:1px solid #3a4150; flex:none; transition:background .08s; }
+  .led.on { background:#f6a24a; border-color:#f6a24a; box-shadow:0 0 12px #f6a24a99; }
+  .dimtext { color:var(--dim); font-size:11px; }
+  .qbox { margin-left:auto; text-align:center; }
+  .qbox b { display:block; font-size:20px; }
+  .qbox span { color:var(--dim); font-size:11px; }
+  .knobs { display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:10px; }
+  .knob { background:#11141a; border-radius:6px; padding:9px 11px; }
+  .knob .kh { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+  .knob .kn { font-weight:bold; font-size:12px; }
+  .knob input[type=number] { width:86px; font:inherit; text-align:right; padding:3px 5px;
+      background:#1c2027; color:var(--text); border:1px solid var(--line); border-radius:4px; }
+  .knob input[type=range] { width:100%; margin:7px 0 2px; }
+  .knob .kw { color:var(--dim); font-size:11px; }
+  .knob.changed { outline:1px solid #2b6cb0; }
+  #codeOut { background:#11141a; border-radius:6px; padding:12px; margin:12px 0 0;
+             overflow-x:auto; font:12px/1.6 Consolas, monospace; white-space:pre; }
   .stat .v { font-size:17px; font-weight:bold; }
   .stat .k { font-size:10px; color:var(--dim); }
   .warn { color:#e08050; }
@@ -92,6 +112,19 @@
       <div class="stat"><div class="v" id="sMa">0</div><div class="k">전류 mA</div></div>
       <div class="stat"><div class="v" id="sHz">0</div><div class="k">수신 Hz</div></div>
     </div>
+
+    <div class="btnrow">
+      <div class="led" id="btnLed"></div>
+      <div>
+        <b id="btnText">버튼 — 대기</b>
+        <div class="dimtext" id="btnHint">누르면 불이 들어옵니다</div>
+      </div>
+      <div class="qbox"><b id="qCount">0</b><span>쌓인 개수</span></div>
+    </div>
+    <div class="bar" style="margin:10px 0 0">
+      <button id="btnCheck" disabled>납땜 확인</button>
+      <button id="btnScan" disabled>핀 찾기</button>
+    </div>
   </div>
 
   <div class="panel">
@@ -104,6 +137,18 @@
     </div>
     <div id="log"></div>
   </div>
+</div>
+
+<div class="panel" style="margin-top:14px">
+  <div class="bar" style="margin-bottom:10px">
+    <b style="font-size:14px">감도 · 버튼 설정</b>
+    <button id="tLoad" disabled>봉에서 불러오기</button>
+    <button id="tReset" disabled>기본값으로</button>
+    <button id="tCode" disabled>소스에 넣을 값 보기</button>
+    <span class="dimtext">바꾸면 즉시 봉에 적용됩니다. 저장은 안 되니 재부팅하면 돌아갑니다.</span>
+  </div>
+  <div id="knobs" class="knobs"><span class="dimtext">연결한 뒤 "봉에서 불러오기" 를 누르세요.</span></div>
+  <pre id="codeOut" hidden></pre>
 </div>
 
 <script>
@@ -136,6 +181,144 @@ var hist = [];             // 그래프용 (최근 N개)
 var HIST_MAX = 300;
 var rxCount = 0, lastHzAt = performance.now(), lastRxAt = 0;
 
+/* ------------------------------------------------- 봉에 명령 보내기 */
+/*
+ * 읽기만 하던 페이지에 쓰기를 더한다.
+ *
+ * 쓸 때마다 getWriter() 로 잡고 곧바로 놓는다. 라이터를 들고 있으면
+ * port.writable 이 잠긴 채로 남아서 연결 해제 때 close() 가 실패한다 —
+ * 리더에서 이미 한 번 겪은 문제라 같은 실수를 되풀이하지 않는다.
+ */
+async function send(line) {
+  if (!port || !port.writable) return false;
+  var w = null;
+  try {
+    w = port.writable.getWriter();
+    await w.write(new TextEncoder().encode(line + NL));
+    return true;
+  } catch (e) {
+    appendLog('보내기 실패: ' + e.message);
+    return false;
+  } finally {
+    if (w) { try { w.releaseLock(); } catch (e) {} }
+  }
+}
+
+/* ---------------------------------------------------------- 손잡이 */
+/*
+ * 펌웨어가 "TUNE" 에 답해 내보내는 줄을 그대로 화면으로 만든다.
+ *   ST tune_<키>=<값> <최소> <최대> <설명>
+ *
+ * 목록을 여기 박아두지 않는 이유는, 박아두면 펌웨어에 손잡이를 더할 때마다
+ * 이 파일도 같이 고쳐야 하고 결국 어긋나기 때문이다.
+ */
+var knobs = {};          // key -> { el, input, range, value, base, lo, hi, what }
+var knobOrder = [];
+
+function knobLine(line) {
+  var m = /^ST tune_([a-z_]+)=(-?[\d.]+) (-?[\d.]+) (-?[\d.]+) ?(.*)$/.exec(line);
+  if (!m) return false;
+  addKnob(m[1], +m[2], +m[3], +m[4], m[5] || '');
+  return true;
+}
+
+function addKnob(key, val, lo, hi, what) {
+  var k = knobs[key];
+  if (!k) {
+    var el = document.createElement('div');
+    el.className = 'knob';
+    el.innerHTML =
+      '<div class="kh"><span class="kn"></span><input type="number"></div>' +
+      '<input type="range"><div class="kw"></div>';
+    el.querySelector('.kn').textContent = key;
+    el.querySelector('.kw').textContent = what;
+
+    k = knobs[key] = {
+      el: el,
+      input: el.querySelector('input[type=number]'),
+      range: el.querySelector('input[type=range]'),
+      base: val, lo: lo, hi: hi
+    };
+    knobOrder.push(key);
+
+    /* 정수 손잡이는 소수점을 안 보여준다 */
+    var whole = (hi - lo) >= 8 && Math.abs(val - Math.round(val)) < 1e-6;
+    k.step = whole ? 1 : (hi - lo) / 200;
+
+    k.input.min = k.range.min = lo;
+    k.input.max = k.range.max = hi;
+    k.input.step = k.range.step = k.step;
+
+    k.range.oninput = function () { setKnob(key, +k.range.value, true); };
+    k.input.onchange = function () { setKnob(key, +k.input.value, true); };
+
+    var host = $('knobs');
+    if (knobOrder.length === 1) host.innerHTML = '';
+    host.appendChild(el);
+  }
+  setKnob(key, val, false);
+}
+
+function setKnob(key, val, push) {
+  var k = knobs[key];
+  if (!k) return;
+  if (val < k.lo) val = k.lo;
+  if (val > k.hi) val = k.hi;
+
+  k.value = val;
+  var txt = (k.step >= 1) ? String(Math.round(val)) : val.toFixed(3);
+  if (document.activeElement !== k.input) k.input.value = txt;
+  k.range.value = val;
+  k.el.classList.toggle('changed', Math.abs(val - k.base) > 1e-6);
+
+  if (push) send('TUNE ' + key + ' ' + txt);
+}
+
+function showCode() {
+  var g = [], q = [];
+  for (var i = 0; i < knobOrder.length; i++) {
+    var key = knobOrder[i], k = knobs[key];
+    if (Math.abs(k.value - k.base) < 1e-6) continue;
+    var v = (k.step >= 1) ? String(Math.round(k.value)) : k.value.toFixed(3) + 'f';
+    (CFG_MAP[key] ? g : q).push([key, v]);
+  }
+  var out = [];
+  if (!g.length && !q.length) {
+    out.push('기본값에서 바뀐 것이 없습니다.');
+  } else {
+    if (g.length) {
+      out.push('// main/gesture.c  —  gesture_default_config()');
+      for (var a = 0; a < g.length; a++) out.push('cfg->' + CFG_MAP[g[a][0]] + ' = ' + g[a][1] + ';');
+    }
+    if (q.length) {
+      if (g.length) out.push('');
+      out.push('// main/board_config.h');
+      for (var b = 0; b < q.length; b++) {
+        var name = BC_MAP[q[b][0]];
+        if (name) out.push('#define ' + name + '   ' + q[b][1]);
+      }
+    }
+  }
+  var pre = $('codeOut');
+  pre.textContent = out.join(NL);
+  pre.hidden = false;
+}
+
+/* 손잡이 키 -> 소스의 이름. 페이지가 붙여넣을 코드를 만들 때 쓴다. */
+var CFG_MAP = {
+  idle_rms: 'idle_rms_g', idle_exit: 'idle_exit_ratio', axis_ratio: 'axis_ratio',
+  vig_peak: 'vig_peak_g', vig_rms: 'vig_rms_g', vig_gyro: 'vig_gyro_dps',
+  vig_gyro_min: 'vig_gyro_min_rms', vig_hyst: 'vig_hysteresis',
+  stroke_dead: 'stroke_dead_g', stroke_flip: 'stroke_flip_dot',
+  max_crest: 'max_crest', min_strokes: 'min_strokes',
+  confirm_ticks: 'confirm_ticks', hold_ms: 'hold_ms'
+};
+var BC_MAP = {
+  add_ms: 'QUEUE_ADD_INTERVAL_MS', arm_ms: 'QUEUE_ARM_MS', gap_ms: 'QUEUE_GAP_MS',
+  queue_max: 'QUEUE_MAX', btn_gpio: 'BUTTON_GPIO',
+  btn_debounce: 'BUTTON_DEBOUNCE_MS', btn_low: 'BUTTON_ACTIVE_LOW'
+};
+
 /* ---------------------------------------------------------- 시리얼 */
 
 async function connect() {
@@ -159,6 +342,8 @@ async function connect() {
   $('save').disabled = false;
   setStatus('연결됨 — 데이터 기다리는 중');
   appendLog('--- 연결됨 ---');
+  setToolsEnabled(true);
+  send('TUNE');            // 손잡이 목록을 바로 받아 온다
 
   keepReading = true;
   lastRxAt = performance.now();
@@ -223,6 +408,7 @@ async function readLoop() {
 
 async function disconnect() {
   keepReading = false;
+  setToolsEnabled(false);
 
   // 순서가 중요하다: 리더를 취소·해제한 뒤에야 포트가 닫힌다
   try { if (reader) await reader.cancel(); } catch (e) {}
@@ -313,6 +499,7 @@ async function reconnect(info) {
       $('save').disabled = false;
       setStatus('재연결됨 — 부팅 로그를 기다립니다');
       appendLog('--- 재연결됨 ---');
+      setToolsEnabled(true);
       keepReading = true;
       lastRxAt = performance.now();
       readLoop();
@@ -346,7 +533,8 @@ function handleLine(line) {
   if (lines.length > 20000) lines.shift();
 
   if (line.indexOf('TUNE,') !== 0) {
-    appendLog(line);        // 부팅 로그·경고 등은 그대로 보여준다
+    if (knobLine(line)) return;   // 손잡이 목록은 화면으로 올라간다
+    appendLog(line);              // 부팅 로그·경고 등은 그대로 보여준다
     return;
   }
 
@@ -357,8 +545,13 @@ function handleLine(line) {
     t: +p[1], g: p[2],
     v: +p[3], h: +p[4], total: +p[5],
     peak: +p[6], gyro: +p[7], strokes: +p[8],
-    tilt: +p[9], ma: p.length > 10 ? +p[10] : 0
+    tilt: +p[9], ma: p.length > 10 ? +p[10] : 0,
+    btn: p.length > 11 ? +p[11] : -1,
+    q:   p.length > 12 ? +p[12] : -1
   };
+
+  if (d.btn >= 0) showButton(d.btn === 1);
+  if (d.q >= 0) $('qCount').textContent = d.q;
 
   rxCount++;
   hist.push(d);
@@ -473,6 +666,42 @@ function appendLog(t) {
   if (el.textContent.length > 40000) el.textContent = el.textContent.slice(-30000);
   if (stick) el.scrollTop = el.scrollHeight;
 }
+
+/* ---------------------------------------------------------- 버튼 표시 */
+
+var btnWasDown = false;
+function showButton(down) {
+  if (down === btnWasDown) return;
+  btnWasDown = down;
+  $('btnLed').classList.toggle('on', down);
+  $('btnText').textContent = down ? '버튼 — 누르는 중' : '버튼 — 뗌';
+  $('btnHint').textContent = down
+    ? '흔들면 이모티콘이 쌓입니다'
+    : '뗀 순간 전송 신호가 나갑니다';
+}
+
+/* 연결 상태에 따라 켜고 끈다. 끊긴 채로 누르면 아무 일도 안 일어나는 게 맞다. */
+function setToolsEnabled(on) {
+  var ids = ['btnCheck', 'btnScan', 'tLoad', 'tReset', 'tCode'];
+  for (var i = 0; i < ids.length; i++) $(ids[i]).disabled = !on;
+  if (!on) showButton(false);
+}
+
+$('btnCheck').onclick = function () {
+  appendLog('--- 납땜 확인: 지금 누른 채로 한 번 더 눌러보세요 ---');
+  send('BTN');
+};
+$('btnScan').onclick = function () {
+  appendLog('--- 핀 찾기: 버튼을 누른 채로 두세요. 0 인 핀이 그 핀입니다 ---');
+  send('BTN scan');
+};
+$('tLoad').onclick  = function () { send('TUNE'); };
+$('tReset').onclick = function () {
+  for (var k in knobs) knobs[k].el.classList.remove('changed');
+  $('codeOut').hidden = true;
+  send('TUNE reset');
+};
+$('tCode').onclick = showCode;
 
 $('connect').onclick = connect;
 $('disconnect').onclick = disconnect;

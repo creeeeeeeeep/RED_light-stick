@@ -10,6 +10,7 @@ idf_component_register(
          "ota.c"
          "devlog.c"
          "power.c"
+         "tuning.c"
     INCLUDE_DIRS "."
     REQUIRES driver esp_timer nvs_flash esp_wifi esp_netif esp_event
              esp_http_client esp_https_ota app_update esp_app_format json mbedtls

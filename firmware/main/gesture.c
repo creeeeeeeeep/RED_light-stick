@@ -592,6 +592,16 @@ gesture_t gesture_update(gesture_engine_t *eng, const qmi8658_data_t *s,
     return eng->committed;
 }
 
+void gesture_get_config(const gesture_engine_t *eng, gesture_config_t *out)
+{
+    if (eng && out) *out = eng->cfg;
+}
+
+void gesture_set_config(gesture_engine_t *eng, const gesture_config_t *cfg)
+{
+    if (eng && cfg) eng->cfg = *cfg;
+}
+
 gesture_t gesture_current(const gesture_engine_t *eng)
 {
     return eng ? eng->committed : GESTURE_IDLE;

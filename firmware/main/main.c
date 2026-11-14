@@ -14,6 +14,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -33,6 +34,7 @@
 #include "ota.h"
 #include "devlog.h"
 #include "power.h"
+#include "tuning.h"
 
 static const char *TAG = "cheerstick";
 
@@ -66,6 +68,9 @@ static bool s_queue_added = false;   /* 이번 프레임에 새로 쌓였는가 
  */
 static bool s_button_down = false;
 
+/* WiFi 설정이 저장돼 있는가. 안 붙었을 때 어떤 색으로 알릴지 가른다. */
+static bool s_wifi_configured = false;
+
 static inline uint32_t now_ms(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000);
@@ -87,7 +92,7 @@ static inline uint32_t now_ms(void)
 static void queue_note_add(void)
 {
     portENTER_CRITICAL(&s_lock);
-    if (s_sent_count < QUEUE_MAX) {
+    if (s_sent_count < tuning_queue_max()) {
         s_sent_count++;
     }
     s_queue_added = true;
@@ -164,6 +169,9 @@ static void imu_task(void *arg)
         return;
     }
 
+    /* 이 뒤로 TUNE 명령이 엔진에 값을 바로 꽂는다 */
+    tuning_attach(eng);
+
     const TickType_t period = pdMS_TO_TICKS(1000 / IMU_SAMPLE_HZ);
     TickType_t last_wake = xTaskGetTickCount();
     uint32_t log_tick = 0;
@@ -231,7 +239,7 @@ static void imu_task(void *arg)
              * 그래서 짧은 공백은 흔들기가 이어지는 중으로 본다.
              */
             if (!idle_since) idle_since = t ? t : 1;
-            if ((t - idle_since) >= QUEUE_GAP_MS) {
+            if ((t - idle_since) >= (uint32_t)tuning_queue_gap_ms()) {
                 armed = false;
                 prev_gesture = GESTURE_IDLE;
             }
@@ -252,11 +260,11 @@ static void imu_task(void *arg)
              * 한 번 걸리고 나면 그 뒤로는 간격만 본다. 흔드는 동안에는
              * 정확히 1초에 하나씩 일정하게 올라간다.
              */
-            if (!armed && (t - gesture_start_ms) >= QUEUE_ARM_MS) {
+            if (!armed && (t - gesture_start_ms) >= (uint32_t)tuning_queue_arm_ms()) {
                 armed = true;
-                last_add_ms = t - QUEUE_ADD_INTERVAL_MS;   /* 첫 개는 곧바로 */
+                last_add_ms = t - (uint32_t)tuning_queue_add_ms();   /* 첫 개는 곧바로 */
             }
-            if (armed && (t - last_add_ms) >= QUEUE_ADD_INTERVAL_MS) {
+            if (armed && (t - last_add_ms) >= (uint32_t)tuning_queue_add_ms()) {
                 last_add_ms = t;
                 queue_note_add();
                 /* 쏘고 잊는다. 실제 전송은 net 태스크가 맡는다. */
@@ -282,10 +290,11 @@ static void imu_task(void *arg)
             gesture_get_features(eng, &f);
             char line[128];
             snprintf(line, sizeof(line),
-                     "TUNE,%lu,%s,%.3f,%.3f,%.3f,%.3f,%.1f,%d,%.1f,%.0f",
+                     "TUNE,%lu,%s,%.3f,%.3f,%.3f,%.3f,%.1f,%d,%.1f,%.0f,%d,%d",
                      (unsigned long)t, gesture_name(g),
                      f.rms_vertical, f.rms_horizontal, f.rms_total,
-                     f.peak_linear, f.rms_gyro, f.strokes, f.tilt_deg, matrix_current_ma());
+                     f.peak_linear, f.rms_gyro, f.strokes, f.tilt_deg, matrix_current_ma(),
+                     btn_down ? 1 : 0, s_sent_count);
             printf("%s\n", line);
             /* 개발자 빌드에서만. 배포 빌드에서는 빈 함수라 통째로 사라진다. */
             devlog_line(line);
@@ -296,11 +305,38 @@ static void imu_task(void *arg)
     }
 }
 
+/*
+ * WiFi 가 안 붙었을 때 화면 전체로 알린다.
+ *
+ * 봉은 확산 돔 안에 들어가 있어서 작은 아이콘이나 애니메이션은 보이지 않는다.
+ * 그래서 색 하나로 말한다 — 팬이 전원만 꽂고 "왜 아무것도 안 나가지" 하며
+ * 헤매지 않도록.
+ *
+ *   파랑   WiFi 설정이 아예 없다          → 설정 페이지를 열어야 한다
+ *   주황   설정은 있는데 아직 못 붙었다    → 비밀번호나 공유기를 확인
+ *
+ * 붙고 나면 이 화면은 사라지고 평소 이펙트로 돌아간다.
+ */
+static void render_no_wifi(uint32_t t, bool configured)
+{
+    /* 2.4초 주기의 느린 숨쉬기. 깜빡이면 고장처럼 보여서 일부러 느리게 둔다. */
+    const float ph = (float)(t % 2400) / 2400.0f;
+    float k = 0.35f + 0.65f * (0.5f - 0.5f * cosf(ph * 2.0f * 3.14159265f));
+
+    const rgb_t c = configured
+        ? (rgb_t){ (uint8_t)(150 * k), (uint8_t)(62 * k), 0 }    /* 주황 */
+        : (rgb_t){ 0, (uint8_t)(70 * k), (uint8_t)(160 * k) };   /* 파랑 */
+
+    for (int y = 0; y < MATRIX_H; y++) {
+        for (int x = 0; x < MATRIX_W; x++) matrix_set(x, y, c);
+    }
+}
+
 /* 핀 하나가 눌린 상태인지 */
 static bool button_is_down(int gpio)
 {
     int level = gpio_get_level(gpio);
-    return BUTTON_ACTIVE_LOW ? (level == 0) : (level != 0);
+    return tuning_button_active_low() ? (level == 0) : (level != 0);
 }
 
 /*
@@ -318,14 +354,14 @@ static bool button_poll(uint32_t t, bool *changed)
     *changed = false;
 
     /* 납땜한 버튼과 내장 BOOT 버튼 중 아무거나 */
-    bool raw = button_is_down(BUTTON_GPIO) || button_is_down(BUTTON_ONBOARD_GPIO);
+    bool raw = button_is_down(tuning_button_gpio()) || button_is_down(BUTTON_ONBOARD_GPIO);
 
     if (raw != raw_prev) {
         raw_prev = raw;
         change_ms = t;               /* 흔들림이 멎을 때까지 기다린다 */
         return stable;
     }
-    if (raw != stable && (t - change_ms) >= BUTTON_DEBOUNCE_MS) {
+    if (raw != stable && (t - change_ms) >= (uint32_t)tuning_button_debounce_ms()) {
         stable = raw;
         *changed = true;
     }
@@ -349,21 +385,41 @@ static void handle_flush(uint32_t t)
     led_effect_on_flush(t);
 }
 
-static void led_task(void *arg)
+/*
+ * 버튼 핀을 입력으로 잡는다.
+ *
+ * 핀 번호를 실행 중에 바꿀 수 있어서(TUNE btn_gpio) 다시 부를 수 있게
+ * 떼어 뒀다. 어느 패드에 납땜했는지 모를 때 굽지 않고 찾아볼 수 있다.
+ */
+static void apply_button_pins(void)
 {
-    (void)arg;
-
+    const bool low = tuning_button_active_low();
     const gpio_config_t btn_cfg = {
-        .pin_bit_mask = (1ULL << BUTTON_GPIO) | (1ULL << BUTTON_ONBOARD_GPIO),
+        .pin_bit_mask = (1ULL << tuning_button_gpio()) | (1ULL << BUTTON_ONBOARD_GPIO),
         .mode         = GPIO_MODE_INPUT,
-        .pull_up_en   = BUTTON_ACTIVE_LOW ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
-        .pull_down_en = BUTTON_ACTIVE_LOW ? GPIO_PULLDOWN_DISABLE : GPIO_PULLDOWN_ENABLE,
+        .pull_up_en   = low ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
+        .pull_down_en = low ? GPIO_PULLDOWN_DISABLE : GPIO_PULLDOWN_ENABLE,
         .intr_type    = GPIO_INTR_DISABLE,
     };
     ESP_ERROR_CHECK(gpio_config(&btn_cfg));
     ESP_LOGI(TAG, "전송 버튼: GPIO%d (납땜) / GPIO%d (내장) — 눌림=%s",
-             BUTTON_GPIO, BUTTON_ONBOARD_GPIO,
-             BUTTON_ACTIVE_LOW ? "LOW" : "HIGH");
+             tuning_button_gpio(), BUTTON_ONBOARD_GPIO, low ? "LOW" : "HIGH");
+}
+
+/* TUNE btn_gpio 로 핀이 바뀌면 불린다 */
+static void on_button_pin_changed(int old_gpio, int new_gpio)
+{
+    ESP_LOGI(TAG, "버튼 핀 GPIO%d → GPIO%d", old_gpio, new_gpio);
+    if (old_gpio != BUTTON_ONBOARD_GPIO) gpio_reset_pin((gpio_num_t)old_gpio);
+    apply_button_pins();
+}
+
+static void led_task(void *arg)
+{
+    (void)arg;
+
+    apply_button_pins();
+    tuning_set_button_cb(on_button_pin_changed);
 
     const TickType_t period = pdMS_TO_TICKS(1000 / LED_FRAME_HZ);
     TickType_t last_wake = xTaskGetTickCount();
@@ -432,10 +488,19 @@ static void led_task(void *arg)
 
         const led_queue_view_t view = {
             .count = qcount,
-            .capacity = QUEUE_MAX,
+            .capacity = tuning_queue_max(),
         };
 
-        led_effect_render(g, intensity, t, &view);
+        /*
+         * WiFi 가 안 붙어 있으면 그걸 먼저 알린다. 이 상태에서는 흔들어도
+         * 서버로 아무것도 못 가므로, 평소 이펙트를 보여주면 잘 되는 줄 안다.
+         */
+        if (!net_is_connected()) {
+            matrix_clear();
+            render_no_wifi(t, s_wifi_configured);
+        } else {
+            led_effect_render(g, intensity, t, &view);
+        }
         matrix_flush();
     }
 }
@@ -445,6 +510,7 @@ static void led_task(void *arg)
 /* 시리얼로 설정이 바뀌면 WiFi 를 다시 붙인다 */
 static void on_settings_changed(const settings_t *s)
 {
+    if (s) s_wifi_configured = settings_has_wifi(s);
     net_reconnect(s);
     ota_settings_changed(s);
     devlog_settings_changed(s);
@@ -519,6 +585,7 @@ void app_main(void)
 
     settings_t cfg;
     settings_load(&cfg);
+    s_wifi_configured = settings_has_wifi(&cfg);
     net_start(&cfg);
     ota_start(&cfg);
     devlog_start(&cfg);
