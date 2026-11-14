@@ -57,23 +57,35 @@ function Use-Idf {
     if ($script:IdfReady) { return }
     $script:IdfReady = $true
 
+    # ESP-IDF 터미널에서 실행했다면 이미 들어와 있다
     if (Get-Command idf.py -ErrorAction SilentlyContinue) { return }
 
-    $init = 'C:\Espressif\Initialize-Idf.ps1'
-    if (-not (Test-Path $init)) {
+    $fw = Get-ChildItem 'C:/Espressif/frameworks' -Directory -Filter 'esp-idf-*' -ErrorAction SilentlyContinue |
+          Sort-Object Name -Descending
+    if (-not $fw) {
         Write-Host "ESP-IDF 를 찾지 못했습니다. ESP-IDF 설치 후 다시 시도하세요." -ForegroundColor Red
         Write-Host "  https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/get-started/" -ForegroundColor DarkGray
         return
     }
 
-    if ($env:CROWN_IDF_ID) {
-        & $init -IdfId $env:CROWN_IDF_ID *>$null
-        return
-    }
+    <#
+      ESP-IDF 가 들고 있는 파이썬을 PATH 맨 앞에 둔다.
 
-    # 설치된 IDF 가 하나뿐이면 이름을 몰라도 된다
-    $ids = Get-ChildItem 'C:\Espressiframeworks' -Directory -ErrorAction SilentlyContinue
-    if ($ids.Count -eq 1) { & $init *>$null } else { & $init *>$null }
+      export.ps1 은 PATH 에서 찾은 파이썬의 버전으로 가상환경 이름을 만든다
+      (idf5.5_py3.11_env). 시스템에 다른 버전이 깔리면 있지도 않은
+      idf5.5_py3.14_env 를 찾다가 실패하고, 그 뒤로 idf.py 가 없다는
+      엉뚱한 오류만 나온다.
+    #>
+    $py = Get-ChildItem 'C:/Espressif/tools/idf-python' -Directory -ErrorAction SilentlyContinue |
+          Sort-Object Name -Descending
+    if ($py) { $env:PATH = $py[0].FullName + ';' + $env:PATH }
+
+    & (Join-Path $fw[0].FullName 'export.ps1') *>$null
+
+    if (-not (Get-Command idf.py -ErrorAction SilentlyContinue)) {
+        Write-Host "ESP-IDF 환경을 불러오지 못했습니다." -ForegroundColor Red
+        Write-Host "  $(Join-Path $fw[0].FullName 'export.ps1') 을 직접 실행해 보면 이유가 보입니다." -ForegroundColor DarkGray
+    }
 }
 
 function Get-Version { (Get-Content 'version.txt' -Raw).Trim() }

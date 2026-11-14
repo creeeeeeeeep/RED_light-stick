@@ -55,6 +55,16 @@ static bool      s_gesture_dirty = false;
  */
 static int  s_sent_count = 0;
 static bool s_queue_added = false;   /* 이번 프레임에 새로 쌓였는가 */
+/*
+ * 버튼을 누르고 있는 동안에만 쌓는다.
+ *
+ * 봉이 책상에 굴러다니거나 집어드는 것만으로도 모션이 잡혀서 입력창이
+ * 지저분해졌다. 버튼으로 구간을 명시하면 그 일이 없어지고, "사람의 1회
+ * 조작 = 채팅 1건" 이라는 치지직 전제에도 경계가 분명해진다.
+ *
+ * led_task 가 디바운스해서 쓰고, imu_task 가 읽는다.
+ */
+static bool s_button_down = false;
 
 static inline uint32_t now_ms(void)
 {
@@ -181,13 +191,29 @@ static void imu_task(void *arg)
         bool changed = false;
         gesture_t g = gesture_update(eng, &sample, t, &changed);
 
+        bool btn_down;
         portENTER_CRITICAL(&s_lock);
         s_gesture   = g;
         s_intensity = gesture_intensity(eng);
         if (changed) {
             s_gesture_dirty = true;
         }
+        btn_down = s_button_down;
         portEXIT_CRITICAL(&s_lock);
+
+        /*
+         * 버튼을 놓고 있는 동안은 쌓지 않는다.
+         *
+         * 모션 판정과 LED 는 그대로 돈다 — 흔들면 색이 바뀌는 재미는 남기고,
+         * 입력창에 들어가는 것만 버튼으로 막는다. 쌓인 개수는 LED 밝기의
+         * 바닥값으로 보이므로 버튼을 쥐어야 차오르는 것이 눈에 보인다.
+         */
+        if (!btn_down) {
+            armed = false;
+            prev_gesture = GESTURE_IDLE;
+            idle_since = 0;
+            goto render;
+        }
 
         /*
          * 흔드는 동안 일정 간격으로 큐에 쌓는다.
@@ -239,6 +265,7 @@ static void imu_task(void *arg)
             }
         }
 
+    render:
         if (changed) {
             gesture_features_t f;
             gesture_get_features(eng, &f);
@@ -276,12 +303,19 @@ static bool button_is_down(int gpio)
     return BUTTON_ACTIVE_LOW ? (level == 0) : (level != 0);
 }
 
-/* 눌린 순간(엣지)에만 true 를 한 번 반환한다 */
-static bool button_pressed_edge(uint32_t t)
+/*
+ * 디바운스된 버튼 상태를 돌려준다. 상태가 막 바뀐 프레임에서만 *changed 가 true.
+ *
+ * 눌림만 보던 것을 뗌까지 보도록 바꿨다. 누르면 쌓기 시작하고 떼면 전송하므로
+ * 양쪽 엣지가 모두 필요하다.
+ */
+static bool button_poll(uint32_t t, bool *changed)
 {
     static bool stable = false;      /* 디바운스가 끝난 상태 */
     static bool raw_prev = false;
     static uint32_t change_ms = 0;
+
+    *changed = false;
 
     /* 납땜한 버튼과 내장 BOOT 버튼 중 아무거나 */
     bool raw = button_is_down(BUTTON_GPIO) || button_is_down(BUTTON_ONBOARD_GPIO);
@@ -289,14 +323,13 @@ static bool button_pressed_edge(uint32_t t)
     if (raw != raw_prev) {
         raw_prev = raw;
         change_ms = t;               /* 흔들림이 멎을 때까지 기다린다 */
-        return false;
+        return stable;
     }
-    if (raw == stable || (t - change_ms) < BUTTON_DEBOUNCE_MS) {
-        return false;
+    if (raw != stable && (t - change_ms) >= BUTTON_DEBOUNCE_MS) {
+        stable = raw;
+        *changed = true;
     }
-
-    stable = raw;
-    return stable;                   /* 눌림으로 확정된 순간에만 true */
+    return stable;
 }
 
 static void handle_flush(uint32_t t)
@@ -359,8 +392,18 @@ static void led_task(void *arg)
             net_post_status(n);
         }
 
-        if (button_pressed_edge(t)) {
-            handle_flush(t);
+        bool btn_changed;
+        const bool btn_down = button_poll(t, &btn_changed);
+        if (btn_changed) {
+            portENTER_CRITICAL(&s_lock);
+            s_button_down = btn_down;
+            portEXIT_CRITICAL(&s_lock);
+
+            if (btn_down) {
+                ESP_LOGI(TAG, "버튼 눌림 — 흔드는 대로 쌓는다");
+            } else {
+                handle_flush(t);     /* 떼면 전송 */
+            }
         }
 
         gesture_t g;
