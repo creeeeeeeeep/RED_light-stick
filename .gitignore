@@ -65,3 +65,6 @@ __pycache__/
 Thumbs.db
 desktop.ini
 *.tmp
+
+# 카페에 올리는 배포 묶음. 배포묶음_만들기.py 로 언제든 다시 만든다.
+RED응원봉_v*.zip
