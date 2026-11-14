@@ -33,7 +33,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '0.8.1';
+  const VERSION = '0.9.0';
   const LOG = '[크라운봉]';
 
   const DIALOG_SEL = '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]';
