@@ -41,9 +41,40 @@ let lastStickAt = 0;
 
 const log = (...a) => console.log('[크라운봉/bg]', ...a);
 
+/*
+ * 확장은 언제나 localhost 로 붙는다.
+ *
+ * 봉이 쓸 주소(PC 의 LAN IP)와 확장이 쓸 주소는 다르다. 봉은 LAN 을 건너오니
+ * LAN IP 가 필요하지만, 확장은 서버와 같은 PC 안에 있다. 서버의 /ws 는
+ * localhost 에서 온 연결만 받으므로, LAN IP 로 붙으면 403 을 맞고 조용히
+ * 재접속만 반복한다.
+ *
+ * 예전 설정 페이지가 두 주소를 같은 값으로 저장한 적이 있어서, 저장된 값이
+ * LAN IP 면 여기서 되돌린다. 포트는 그대로 둔다.
+ */
+function toLocalWs(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname === 'localhost') return url;
+    const scheme = (u.protocol === 'wss:' || u.protocol === 'https:') ? 'wss' : 'ws';
+    const port = u.port ? ':' + u.port : '';
+    return `${scheme}://localhost${port}/ws`;
+  } catch (e) {
+    return url;
+  }
+}
+
 async function getConfig() {
   const stored = await chrome.storage.local.get(DEFAULTS);
-  return { ...DEFAULTS, ...stored };
+  const cfg = { ...DEFAULTS, ...stored };
+
+  const fixed = toLocalWs(cfg.serverUrl);
+  if (fixed !== cfg.serverUrl) {
+    log('서버 주소를 localhost 로 고쳤습니다:', cfg.serverUrl, '→', fixed);
+    cfg.serverUrl = fixed;
+    await chrome.storage.local.set({ serverUrl: fixed });
+  }
+  return cfg;
 }
 
 /*

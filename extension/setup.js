@@ -224,12 +224,20 @@ async function doScan() {
  * 봉은 http:// 로 POST 하고 확장은 ws:// 로 붙는다.
  * 같은 주소에서 둘 다 만들어낸다.
  */
-function toWsUrl(base) {
+/*
+ * 봉이 쓸 주소와 확장이 쓸 주소는 다르다 — 포트만 같다.
+ *
+ *   봉   LAN 을 건너온다  →  http://192.168.x.x:8787  (화면의 '서버' 칸 값)
+ *   확장 같은 PC 안에 있다 →  ws://localhost:8787/ws
+ *
+ * 서버의 /ws 는 localhost 에서 온 연결만 받는다. 확장에까지 LAN IP 를
+ * 저장하면 403 을 맞고 붙지 못한다.
+ */
+function toExtensionWsUrl(base) {
   const u = new URL(base);
-  u.protocol = (u.protocol === 'https:') ? 'wss:' : 'ws:';
-  u.pathname = '/ws';
-  u.search = '';
-  return u.toString();
+  const scheme = (u.protocol === 'https:') ? 'wss' : 'ws';
+  const port = u.port ? ':' + u.port : '';
+  return `${scheme}://localhost${port}/ws`;
 }
 
 function randomCode(n) {
@@ -250,7 +258,13 @@ async function save() {
 
   let wsUrl;
   try {
-    wsUrl = toWsUrl(server);
+    const host = new URL(server).hostname;
+    /* 봉은 LAN 을 건너오므로 PC 의 LAN 주소여야 한다 */
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+      return log('서버 주소가 localhost 입니다. 봉은 LAN 을 건너오므로 PC 의 '
+               + 'LAN 주소가 필요합니다. 서버를 켜 두면 자동으로 채워집니다.');
+    }
+    wsUrl = toExtensionWsUrl(server);
   } catch (e) {
     return log('서버 주소 형식이 올바르지 않습니다. http://주소:포트 형태여야 합니다.');
   }
@@ -460,15 +474,10 @@ $('showPass').onchange = (e) => {
 setInterval(refreshState, 5000);
 
 (async function init() {
-  const cur = await chrome.storage.local.get({ serverUrl: '' });
+  /*
+   * '서버' 칸은 봉에게 써넣을 주소다. 저장된 확장 주소(localhost)를 여기
+   * 채우면 봉이 자기 자신을 가리키게 되므로 가져오지 않는다. 이 값은 서버가
+   * hello 로 알려주는 stickUrl 로만 채운다 — refreshState() 가 한다.
+   */
   refreshState();
-
-  if (cur.serverUrl) {
-    try {
-      const u = new URL(cur.serverUrl);
-      u.protocol = (u.protocol === 'wss:') ? 'https:' : 'http:';
-      u.pathname = '';
-      $('server').value = u.toString().replace(/\/$/, '');
-    } catch (e) { /* 무시 */ }
-  }
 })();
