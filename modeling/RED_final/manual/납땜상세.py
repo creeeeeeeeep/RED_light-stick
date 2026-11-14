@@ -2,91 +2,107 @@
 u"""
 납땜 상세도.
 
-보드 그림은 직접 그린다 — 기존 선 그림은 보드를 통째로만 보여줘서
-"어느 패드냐" 가 안 보인다.
+기존 선 그림은 보드를 통째로만 보여줘서 "어느 패드냐" 가 안 보인다.
+여기서는 **납땜하는 면(부품이 붙어 있는 쪽)** 을 크게 그린다.
 
-패드 순서는 제조사 핀아웃(ESP32-S3-Matrix) 기준이다.
-  왼쪽 열 위→아래 : 5V · G · 3V3 · 7 · 6 · 5 · 4 · 3 · 2 · 1
-  오른쪽 열 위→아래 : 33 · 34 · 35 · 36 · 37 · 38 · 39 · 40 · TX · RX
-실크에 찍힌 숫자가 곧 GPIO 번호다.
+패드 배치는 실물 사진 기준이다 (2026-11-14 확인).
+USB-C 를 위로 두고 부품 면을 보면
+  왼쪽 열  위→아래 : 33 34 35 36 37 38 39 40 TX RX
+  오른쪽 열 위→아래 : 5V G 3V3 7 6 5 4 3 2 1
+  가운데 둥근 패드  : GND · 5V · Dout  (매트릭스 전원용. 크고 납땜하기 쉽다)
+
+LED 면에서 보면 좌우가 뒤집힌다 — 제조사 핀아웃 그림이 그쪽이라 헷갈리기 쉽다.
 """
 
-LEFT  = [u"5V", u"G", u"3V3", u"7", u"6", u"5", u"4", u"3", u"2", u"1"]
-RIGHT = [u"33", u"34", u"35", u"36", u"37", u"38", u"39", u"40", u"TX", u"RX"]
+LEFTCOL  = [u"33", u"34", u"35", u"36", u"37", u"38", u"39", u"40", u"TX", u"RX"]
+RIGHTCOL = [u"5V", u"G", u"3V3", u"7", u"6", u"5", u"4", u"3", u"2", u"1"]
 
-USE = {u"5V": u"#E34B4B", u"G": u"#2B2B2B", u"1": u"#F2C230"}   # 쓰는 패드 → 전선 색
+RED, BLACK, YELLOW = u"#E34B4B", u"#2B2B2B", u"#F2C230"
 
 
-def board(front=True):
-    u"""보드 한 면. front=False 면 좌우가 뒤집힌 뒷면(납땜하는 쪽)."""
-    W, H = 250, 250
-    x0, y0 = 30, 18
-    bw, bh = 190, 214
-    pitch = (bh - 26) / 9.0
+def board():
+    u"""납땜하는 면. 실제로 쓰는 패드 네 곳만 색으로 표시한다."""
+    W, H = 440, 400
+    x0, y0, bw, bh = 110, 40, 220, 300
+    pitch = (bh - 34) / 9.0
+    top = y0 + 17
 
-    p = []
-    p.append(u'<rect x="%d" y="%d" width="%d" height="%d" rx="10" '
-             u'fill="#fff" stroke="#111" stroke-width="3"/>' % (x0, y0, bw, bh))
+    p = [u'<rect x="%d" y="%d" width="%d" height="%d" rx="9" fill="#fff" '
+         u'stroke="#111" stroke-width="3"/>' % (x0, y0, bw, bh)]
 
-    # USB-C 셸 (위쪽 가운데)
-    p.append(u'<rect x="%d" y="%d" width="46" height="15" rx="6" fill="#ddd" '
-             u'stroke="#111" stroke-width="2.5"/>' % (x0 + bw / 2 - 23, y0 - 7))
-    p.append(u'<text x="%d" y="%d" font-size="10" text-anchor="middle" fill="#666">USB-C</text>'
-             % (x0 + bw / 2, y0 - 12))
+    # USB-C (위쪽 가운데)
+    p.append(u'<rect x="%d" y="%d" width="56" height="22" rx="4" fill="#e8e8e8" '
+             u'stroke="#111" stroke-width="2.5"/>' % (x0 + bw / 2 - 28, y0 - 14))
+    p.append(u'<text x="%d" y="%d" font-size="11" text-anchor="middle" fill="#666">USB-C</text>'
+             % (x0 + bw / 2, y0 - 20))
 
-    # 8x8 매트릭스는 앞면에만
-    if front:
-        g0x, g0y, cell = x0 + 42, y0 + 36, 13.2
-        for r in range(8):
-            for c in range(8):
-                p.append(u'<rect x="%.1f" y="%.1f" width="10" height="10" rx="1.6" '
-                         u'fill="#fff" stroke="#bbb" stroke-width="1.4"/>'
-                         % (g0x + c * cell, g0y + r * cell))
-    else:
-        p.append(u'<rect x="%d" y="%d" width="106" height="74" rx="4" fill="#f3f3f1" '
-                 u'stroke="#bbb" stroke-width="2"/>' % (x0 + 42, y0 + 70))
-        p.append(u'<text x="%d" y="%d" font-size="11" text-anchor="middle" fill="#999">'
-                 u'ESP32-S3</text>' % (x0 + 95, y0 + 112))
+    # RESET · BOOT
+    for cx, nm in ((x0 + 36, u"RESET"), (x0 + bw - 36, u"BOOT")):
+        p.append(u'<rect x="%d" y="%d" width="26" height="26" rx="4" fill="#f2f2f0" '
+                 u'stroke="#111" stroke-width="2"/>' % (cx - 13, y0 + 16))
+        p.append(u'<text x="%d" y="%d" font-size="9" text-anchor="middle" fill="#888">%s</text>'
+                 % (cx, y0 + 12, nm))
 
-    def column(labels, side_left, flip):
-        u"""side_left: 그림에서 왼쪽에 그릴지. flip: 라벨을 오른쪽 열 것으로 바꿀지."""
-        out = []
-        px = x0 + 13 if side_left else x0 + bw - 13
-        for i, name in enumerate(labels):
-            cy = y0 + 13 + i * pitch
-            col = USE.get(name)
-            r = 7.5 if col else 6
-            out.append(u'<circle cx="%.1f" cy="%.1f" r="%.1f" fill="%s" stroke="#111" '
-                       u'stroke-width="%.1f"/>'
-                       % (px, cy, r, col if col else u"#fff", 3 if col else 2))
-            tx = px + (15 if side_left else -15)
-            anc = u"start" if side_left else u"end"
-            out.append(u'<text x="%.1f" y="%.1f" font-size="11" text-anchor="%s" '
-                       u'font-weight="%s" fill="%s">%s</text>'
-                       % (tx, cy + 4, anc, u"800" if col else u"500",
-                          u"#111" if col else u"#999", name))
-            if col:
-                # 바깥으로 빼는 지시선
-                lx = x0 - 16 if side_left else x0 + bw + 16
-                out.append(u'<path d="M%.1f %.1f H%.1f" stroke="%s" stroke-width="3.5" '
-                           u'stroke-linecap="round"/>' % (px, cy, lx, col))
-                out.append(u'<circle cx="%.1f" cy="%.1f" r="3" fill="%s"/>' % (lx, cy, col))
-        return u"".join(out)
+    # 가운데 칩
+    p.append(u'<rect x="%d" y="%d" width="76" height="76" rx="4" fill="#f3f3f1" '
+             u'stroke="#ccc" stroke-width="2" transform="rotate(45 %d %d)"/>'
+             % (x0 + bw / 2 - 38, y0 + 150, x0 + bw / 2, y0 + 188))
+    p.append(u'<text x="%d" y="%d" font-size="10" text-anchor="middle" fill="#aaa">ESP32-S3</text>'
+             % (x0 + bw / 2, y0 + 192))
 
-    if front:
-        p.append(column(LEFT, True, False))
-        p.append(column(RIGHT, False, True))
-    else:
-        # 뒤집으면 왼쪽 열이 오른쪽으로 온다
-        p.append(column(RIGHT, True, False))
-        p.append(column(LEFT, False, True))
+    def pad(cx, cy, name, color=None, r=7.0):
+        out = [u'<circle cx="%.1f" cy="%.1f" r="%.1f" fill="%s" stroke="#111" '
+               u'stroke-width="%.1f"/>'
+               % (cx, cy, r + (1.5 if color else 0), color or u"#fff", 3 if color else 2)]
+        return out
 
-    cap = u"앞면 (LED)" if front else u"뒷면 (납땜하는 쪽)"
-    p.append(u'<text x="%d" y="%d" font-size="13" font-weight="800" text-anchor="middle">%s</text>'
-             % (x0 + bw / 2, y0 + bh + 22, cap))
+    # ---- 가장자리 두 열 ----
+    for i, nm in enumerate(LEFTCOL):
+        cy = top + i * pitch
+        p += pad(x0 + 15, cy, nm)
+        p.append(u'<text x="%.1f" y="%.1f" font-size="11" fill="#999">%s</text>'
+                 % (x0 + 28, cy + 4, nm))
+
+    use = {u"G": BLACK, u"1": YELLOW}
+    for i, nm in enumerate(RIGHTCOL):
+        cy = top + i * pitch
+        col = use.get(nm)
+        p += pad(x0 + bw - 15, cy, nm, col)
+        p.append(u'<text x="%.1f" y="%.1f" font-size="11" text-anchor="end" '
+                 u'font-weight="%s" fill="%s">%s</text>'
+                 % (x0 + bw - 28, cy + 4, u"800" if col else u"500",
+                    u"#111" if col else u"#999", nm))
+        if col:
+            lx = x0 + bw + 30
+            p.append(u'<path d="M%.1f %.1f H%.1f" stroke="%s" stroke-width="3.5" '
+                     u'stroke-linecap="round"/>' % (x0 + bw - 15, cy, lx, col))
+            label = u"GND" if nm == u"G" else u"SIG"
+            p.append(u'<text x="%.1f" y="%.1f" font-size="14" font-weight="800" fill="%s">%s</text>'
+                     % (lx + 7, cy + 5, col, label))
+
+    # ---- 가운데 둥근 패드 (전원) ----
+    mx = x0 + 62
+    for k, (nm, col) in enumerate(((u"GND", BLACK), (u"5V", RED), (u"Dout", None))):
+        cy = top + (3 + k) * pitch
+        p += pad(mx, cy, nm, col, r=8.5)
+        p.append(u'<text x="%.1f" y="%.1f" font-size="12" font-weight="%s" fill="%s">%s</text>'
+                 % (mx + 15, cy + 4, u"800" if col else u"500",
+                    u"#111" if col else u"#999", nm))
+        if col:
+            p.append(u'<path d="M%.1f %.1f H%.1f" stroke="%s" stroke-width="3.5" '
+                     u'stroke-linecap="round"/>' % (mx, cy, x0 - 34, col))
+            p.append(u'<text x="%.1f" y="%.1f" font-size="14" font-weight="800" '
+                     u'text-anchor="end" fill="%s">%s</text>'
+                     % (x0 - 41, cy + 5, col, nm))
+
+    p.append(u'<text x="%d" y="%d" font-size="14" font-weight="800" text-anchor="middle">'
+             u'납땜하는 면 (부품이 붙어 있는 쪽)</text>' % (W / 2, y0 + bh + 34))
+    p.append(u'<text x="%d" y="%d" font-size="11" text-anchor="middle" fill="#888">'
+             u'LED 면에서 보면 좌우가 뒤집힌다</text>' % (W / 2, y0 + bh + 52))
+
     return (u'<svg class="bd" viewBox="0 0 %d %d" xmlns="http://www.w3.org/2000/svg" '
             u'font-family="Noto Sans KR, Malgun Gothic, sans-serif">%s</svg>'
-            % (W, H + 16, u"".join(p)))
+            % (W, H, u"".join(p)))
 
 
 def switch_detail():

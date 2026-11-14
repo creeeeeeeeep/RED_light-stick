@@ -144,19 +144,24 @@ s7 = step(7, shot(STEP[7], u"받침과 보드", "tall"),
 # ---- 7 뒤에 납땜 상세 한 쪽 ----
 solder = page(
     u'<h2 class="ph">납땜 자리</h2>'
-    u'<div class="bdrow">%s%s</div>'
+    u'<div class="bdrow">%s</div>'
     u'<table class="wire big">'
     u'<tr><td class="k">USB-C <b>V</b></td><td class="ar">&rarr;</td>'
-    u'<td class="v"><span class="dot r"></span>5V</td><td class="pos">맨 위</td></tr>'
+    u'<td class="v"><span class="dot d-r"></span>5V</td>'
+    u'<td class="pos">가운데 둥근 패드</td></tr>'
     u'<tr><td class="k">USB-C <b>G</b></td><td class="ar">&rarr;</td>'
-    u'<td class="v"><span class="dot k"></span>G</td><td class="pos">위에서 2번째</td></tr>'
+    u'<td class="v"><span class="dot d-k"></span>GND</td>'
+    u'<td class="pos">그 바로 위 둥근 패드</td></tr>'
     u'<tr><td class="k">스위치</td><td class="ar">&rarr;</td>'
-    u'<td class="v"><span class="dot y"></span>1</td><td class="pos">맨 아래</td></tr>'
+    u'<td class="v"><span class="dot d-y"></span>1</td>'
+    u'<td class="pos">오른쪽 열 맨 아래</td></tr>'
     u'<tr><td class="k">스위치</td><td class="ar">&rarr;</td>'
-    u'<td class="v"><span class="dot k"></span>G</td><td class="pos">위의 G 에 같이</td></tr>'
+    u'<td class="v"><span class="dot d-k"></span>G</td>'
+    u'<td class="pos">오른쪽 열 위에서 2번째</td></tr>'
     u'</table>'
-    u'<p class="hint">실크에 찍힌 숫자가 그대로 GPIO 번호다. 셋 다 같은 열에 있다.</p>'
-    % (납땜상세.board(True), 납땜상세.board(False)))
+    u'<p class="hint">전원은 가운데 둥근 패드로 간다 — 크고 납땜하기 쉽다. '
+    u'가장자리 <b>5V</b>·<b>G</b> 와 헷갈리지 않도록.</p>'
+    % 납땜상세.board())
 
 switch = page(
     u'<h2 class="ph">스위치 다리 고르기</h2>'
@@ -266,14 +271,14 @@ table.wire .ar{border:0;padding:0 3mm;font-size:17px}
 
 /* 납땜 상세 */
 .bdrow{display:flex;gap:6mm;justify-content:center;align-items:flex-start}
-.bd{width:76mm;height:auto}
+.bd{width:124mm;height:auto}
 .sw{width:92mm;height:auto}
 .swrow{display:flex;justify-content:center}
 table.wire.big td{padding:2.5mm 5mm;font-size:15px}
 table.wire .pos{background:#f8f8f6;color:#666;font-weight:500;font-size:12px}
 .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;
   border:1.5px solid #111;vertical-align:-1px}
-.dot.r{background:#E34B4B}.dot.k{background:#2B2B2B}.dot.y{background:#F2C230}
+.dot.d-r{background:#E34B4B}.dot.d-k{background:#2B2B2B}.dot.d-y{background:#F2C230}
 .hint{font-size:12px;color:#777;margin:3mm 0 0;text-align:center}
 .checkbox{border:2.5px solid #111;border-radius:4px;padding:5mm;display:flex;
   flex-direction:column;align-items:center;gap:2mm;max-width:92mm;margin:0 auto}
