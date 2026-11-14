@@ -28,7 +28,9 @@ RED레드 채널 팬들에게 **무상 배포**할 목적으로 만든다 (판�
 | `modeling/` | 크라운 3D 모델 — STL 과 CadQuery 스크립트 | Python (CadQuery) |
 
 하드웨어는 **Waveshare ESP32-S3-Matrix** (8x8 WS2812 + QMI8658 6축 IMU) 하나로,
-LED와 IMU가 보드에 이미 붙어 있어 **전송 버튼만 납땜하면 된다** (GPIO2 + GND).
+LED와 IMU가 보드에 이미 붙어 있어 **전송 버튼만 납땜하면 된다** (GPIO1 + GND).
+보드 왼쪽 열은 위에서부터 `5V · GND · 3V3 · 7 · 6 · 5 · 4 · 3 · 2 · 1` 이라
+실크의 숫자가 곧 GPIO 번호다 — 버튼은 **맨 아래 `1`**, GND 는 **위에서 두 번째 `G`**.
 
 크라운은 3D 프린팅한다. 현재 판은 `modeling/CROWN_v20/` 이고, `*.py` 는 형상을
 만들어낸 CadQuery 스크립트다 — 치수를 고치려면 STL 이 아니라 이쪽을 고친다.
