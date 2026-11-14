@@ -1,9 +1,0 @@
-{
-  "token": "",
-  "motions": {
-    "SWAY_LR": "redredMinidance1",
-    "PUMP_UD": "redredLight",
-    "VIGOROUS": "redredLight5"
-  },
-  "max_per_message": 10
-}
